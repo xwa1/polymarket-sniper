@@ -7,15 +7,16 @@ export async function GET(req: NextRequest) {
   const minVol  = parseFloat(searchParams.get("minVol")  ?? "1000");
   const now = new Date();
   const maxClose = new Date(now.getTime() + maxDays * 24 * 60 * 60 * 1000);
+  const toDate = (d: Date) => d.toISOString().split("T")[0];
   const params = new URLSearchParams({
     active: "true", closed: "false",
-    end_date_min: now.toISOString(),
-    end_date_max: maxClose.toISOString(),
+    end_date_min: toDate(now),
+    end_date_max: toDate(maxClose),
     limit: "100", order: "end_date_asc",
   });
   try {
     const res = await fetch(`${GAMMA_BASE}/markets?${params}`,
-      { headers: { Accept: "application/json" }, next: { revalidate: 300 } });
+      { headers: { Accept: "application/json" }, cache: "no-store" });
     if (!res.ok) return NextResponse.json(
       { error: `Gamma API error: ${res.status}` }, { status: 502 });
     const raw = await res.json();
@@ -49,21 +50,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
-
 export interface ProcessedMarket {
-  id: string;
-  question: string;
-  slug: string;
-  category: string;
-  endDate: string;
-  daysLeft: number;
-  bestProb: number;
-  bestOutcomeName: string;
-  volume: number;
-  volume24hr: number;
-  bestBid: number;
-  bestAsk: number;
-  spread: number;
-  lastTradePrice: number;
-  oneDayPriceChange: number;
+  id: string; question: string; slug: string; category: string;
+  endDate: string; daysLeft: number; bestProb: number; bestOutcomeName: string;
+  volume: number; volume24hr: number; bestBid: number; bestAsk: number;
+  spread: number; lastTradePrice: number; oneDayPriceChange: number;
 }
