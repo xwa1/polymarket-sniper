@@ -49,3 +49,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
+
+export interface ProcessedMarket {
+  id: string;
+  question: string;
+  slug: string;
+  category: string;
+  endDate: string;
+  daysLeft: number;
+  bestProb: number;
+  bestOutcomeName: string;
+  volume: number;
+  volume24hr: number;
+  bestBid: number;
+  bestAsk: number;
+  spread: number;
+  lastTradePrice: number;
+  oneDayPriceChange: number;
+}
