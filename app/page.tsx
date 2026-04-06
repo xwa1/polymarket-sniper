@@ -308,11 +308,11 @@ export default function Home() {
           value={filters.maxDays}
           onChange={(v) => setFilters((f) => ({ ...f, maxDays: v }))}
           options={[
-            { label: "≤ 12 horas", value: 0.5 },
-            { label: "≤ 1 día", value: 1 },
-            { label: "≤ 2 días", value: 2 },
-            { label: "≤ 3 días", value: 3 },
-            { label: "≤ 7 días", value: 7 },
+           { label: "≤ 1 día", value: 1 },
+{ label: "≤ 2 días", value: 2 },
+{ label: "≤ 7 días", value: 7 },
+{ label: "≤ 14 días", value: 14 },
+{ label: "≤ 30 días", value: 30 },
           ]}
         />
         <FilterSelect
