@@ -6,13 +6,33 @@ export async function GET(req: NextRequest) {
   const maxDays = parseFloat(searchParams.get("maxDays") ?? "2");
   const minVol  = parseFloat(searchParams.get("minVol")  ?? "1000");
   const now = new Date();
-  const maxClose = new Date(now.getTime() + maxDays * 24 * 60 * 60 * 1000);
-  const toDate = (d: Date) => d.toISOString().split("T")[0];
   const params = new URLSearchParams({
-    active: "true", closed: "false",
-    end_date_min: toDate(now),
-    end_date_max: toDate(maxClose),
-    limit: "100", order: "end_date_asc",
+    active: "true",
+    closed: "false",
+    limit: "100",
+    order: "end_date_asc",
+  });
+  try {
+    const res = await fetch(`${GAMMA_BASE}/markets?${params}`,
+      { headers: { Accept: "application/json" }, cache: "no-store" });
+    if (!res.ok) return NextResponse.json(
+      { error: `Gamma API error: ${res.status}` }, { status: 502 });
+    const raw = await res.json();
+
+cat > app/api/markets/route.ts << 'EOF'
+import { NextRequest, NextResponse } from "next/server";
+const GAMMA_BASE = "https://gamma-api.polymarket.com";
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const minProb = parseFloat(searchParams.get("minProb") ?? "0.90");
+  const maxDays = parseFloat(searchParams.get("maxDays") ?? "2");
+  const minVol  = parseFloat(searchParams.get("minVol")  ?? "1000");
+  const now = new Date();
+  const params = new URLSearchParams({
+    active: "true",
+    closed: "false",
+    limit: "100",
+    order: "end_date_asc",
   });
   try {
     const res = await fetch(`${GAMMA_BASE}/markets?${params}`,
@@ -40,8 +60,10 @@ export async function GET(req: NextRequest) {
         spread: m.spread ?? 0, lastTradePrice: m.lastTradePrice ?? 0,
         oneDayPriceChange: m.oneDayPriceChange ?? 0 };
     }).filter((m: any) =>
-      m.bestProb >= minProb && m.volume >= minVol &&
-      m.daysLeft > 0 && m.daysLeft <= maxDays + 0.042
+      m.bestProb >= minProb &&
+      m.volume >= minVol &&
+      m.daysLeft > 0 &&
+      m.daysLeft <= maxDays
     ).sort((a: any, b: any) => b.bestProb - a.bestProb);
     const categories = Array.from(
       new Set(raw.map((m: any) => m.category ?? "").filter(Boolean))).sort();
