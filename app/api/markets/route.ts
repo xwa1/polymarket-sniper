@@ -7,17 +7,6 @@ export async function GET(req: NextRequest) {
   const minVol = parseFloat(searchParams.get("minVol") ?? "1000");
   const now = new Date();
   try {
-
-cat > app/api/markets/route.ts << 'ENDOFFILE'
-import { NextRequest, NextResponse } from "next/server";
-const GAMMA_BASE = "https://gamma-api.polymarket.com";
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const minProb = parseFloat(searchParams.get("minProb") ?? "0.90");
-  const maxDays = parseFloat(searchParams.get("maxDays") ?? "2");
-  const minVol = parseFloat(searchParams.get("minVol") ?? "1000");
-  const now = new Date();
-  try {
     const res = await fetch(`${GAMMA_BASE}/markets?active=true&closed=false&limit=200`, { headers: { Accept: "application/json" }, cache: "no-store" });
     if (!res.ok) return NextResponse.json({ error: `Gamma API error: ${res.status}` }, { status: 502 });
     const raw = await res.json();
