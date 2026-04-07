@@ -10,7 +10,6 @@ export async function GET(req: NextRequest) {
   const now = new Date();
 
   try {
-    // 20 paginas en paralelo = 2000 mercados (cubre crypto, clima, deportes, politica, diarios)
     const offsets = [0,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900];
     const pages = await Promise.all(
       offsets.map((offset) =>
@@ -50,12 +49,28 @@ export async function GET(req: NextRequest) {
         const bestOutcomeName = outcomes[prices.indexOf(bestProb)] ?? "Yes";
 
         const vol = typeof m.volume === "string" ? parseFloat(m.volume) : (m.volume ?? 0);
-        const endDate = m.endDate ?? m.endDateIso ?? "";
-        const daysLeft = endDate
-          ? (new Date(endDate).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-          : 999;
 
-        // URL correcta: usar event slug si existe, si no market slug
+        // Parsear fecha correctamente
+        // Si viene solo como "2026-04-07" sin hora, añadir fin de día UTC (23:59:59)
+        // para no descartar mercados que cierran hoy
+        let endDate = m.endDate ?? m.endDateIso ?? "";
+        let endTime: number;
+        if (endDate) {
+          // Si es solo fecha sin hora (YYYY-MM-DD), tratar como fin de ese día UTC
+          if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+            endTime = new Date(endDate + "T23:59:59Z").getTime();
+          } else {
+            endTime = new Date(endDate).getTime();
+          }
+          // Si la fecha ya pasó pero menos de 2 horas, igual incluirla
+          // (puede que el mercado esté en proceso de resolución)
+        } else {
+          endTime = now.getTime() + 999 * 24 * 60 * 60 * 1000;
+        }
+
+        const daysLeft = (endTime - now.getTime()) / (1000 * 60 * 60 * 24);
+
+        // URL correcta
         const slug = m.slug ?? "";
         const eventSlug = m.events?.[0]?.slug ?? "";
         const url = eventSlug
@@ -87,7 +102,7 @@ export async function GET(req: NextRequest) {
         (m: any) =>
           m.bestProb >= minProb &&
           m.volume >= minVol &&
-          m.daysLeft > 0 &&
+          m.daysLeft > -0.1 && // pequeño margen para mercados resolviéndose
           m.daysLeft <= maxDays
       )
       .sort((a: any, b: any) => a.daysLeft - b.daysLeft);
