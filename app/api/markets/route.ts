@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 
 const GAMMA_BASE = "https://gamma-api.polymarket.com";
 
+async function fetchPage(offset: number): Promise<any[]> {
+  try {
+    const r = await fetch(
+      `${GAMMA_BASE}/markets?active=true&closed=false&limit=100&offset=${offset}`,
+      { headers: { Accept: "application/json" }, cache: "no-store" }
+    );
+    if (!r.ok) return [];
+    const data = await r.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const minProb = parseFloat(searchParams.get("minProb") ?? "0.90");
@@ -10,25 +24,10 @@ export async function GET(req: NextRequest) {
   const now = new Date();
 
   try {
-    const offsets = [0,100,200,300,400,500,600,700,800,900,1000,1100,1200,1300,1400,1500,1600,1700,1800,1900];
-    const pages = await Promise.all(
-      offsets.map((offset) =>
-        fetch(
-          `${GAMMA_BASE}/markets?active=true&closed=false&limit=100&offset=${offset}`,
-          { headers: { Accept: "application/json" }, cache: "no-store" }
-        )
-      )
-    );
-
-    const jsons = await Promise.all(
-      pages.map(async (r) => {
-        if (!r.ok) return [];
-        const data = await r.json();
-        return Array.isArray(data) ? data : [];
-      })
-    );
-
-    const raw = jsons.flat();
+    // Cubrir 5000 mercados en paralelo: offsets 0-4900
+    const offsets = Array.from({ length: 50 }, (_, i) => i * 100);
+    const pages = await Promise.all(offsets.map(fetchPage));
+    const raw = pages.flat();
 
     if (raw.length === 0) {
       return NextResponse.json({ error: "Gamma API error: no data" }, { status: 502 });
@@ -50,24 +49,18 @@ export async function GET(req: NextRequest) {
 
         const vol = typeof m.volume === "string" ? parseFloat(m.volume) : (m.volume ?? 0);
 
-        // Parsear fecha correctamente
-        // Si viene solo como "2026-04-07" sin hora, añadir fin de día UTC (23:59:59)
-        // para no descartar mercados que cierran hoy
+        // Parsear fecha — si viene solo YYYY-MM-DD tratar como fin del día UTC
         let endDate = m.endDate ?? m.endDateIso ?? "";
         let endTime: number;
         if (endDate) {
-          // Si es solo fecha sin hora (YYYY-MM-DD), tratar como fin de ese día UTC
           if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
             endTime = new Date(endDate + "T23:59:59Z").getTime();
           } else {
             endTime = new Date(endDate).getTime();
           }
-          // Si la fecha ya pasó pero menos de 2 horas, igual incluirla
-          // (puede que el mercado esté en proceso de resolución)
         } else {
           endTime = now.getTime() + 999 * 24 * 60 * 60 * 1000;
         }
-
         const daysLeft = (endTime - now.getTime()) / (1000 * 60 * 60 * 24);
 
         // URL correcta
@@ -102,7 +95,7 @@ export async function GET(req: NextRequest) {
         (m: any) =>
           m.bestProb >= minProb &&
           m.volume >= minVol &&
-          m.daysLeft > -0.1 && // pequeño margen para mercados resolviéndose
+          m.daysLeft > -0.1 &&
           m.daysLeft <= maxDays
       )
       .sort((a: any, b: any) => a.daysLeft - b.daysLeft);
