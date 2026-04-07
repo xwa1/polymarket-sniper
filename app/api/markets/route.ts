@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 const GAMMA_BASE = "https://gamma-api.polymarket.com";
 
-async function fetchPage(offset: number): Promise<any[]> {
+async function fetchPage(offset: number, closed: boolean): Promise<any[]> {
   try {
     const r = await fetch(
-      `${GAMMA_BASE}/markets?active=true&closed=false&limit=100&offset=${offset}`,
+      `${GAMMA_BASE}/markets?active=true&closed=${closed}&limit=100&offset=${offset}`,
       { headers: { Accept: "application/json" }, cache: "no-store" }
     );
     if (!r.ok) return [];
@@ -24,16 +24,31 @@ export async function GET(req: NextRequest) {
   const now = new Date();
 
   try {
-    // Cubrir 5000 mercados en paralelo: offsets 0-4900
-    const offsets = Array.from({ length: 50 }, (_, i) => i * 100);
-    const pages = await Promise.all(offsets.map(fetchPage));
-    const raw = pages.flat();
+    // Mercados activos abiertos (offsets 0-4900)
+    const openOffsets = Array.from({ length: 50 }, (_, i) => i * 100);
+    // Mercados cerrados recientes (pueden ser diarios que ya cerraron hoy)
+    const closedOffsets = Array.from({ length: 10 }, (_, i) => i * 100);
+
+    const [openPages, closedPages] = await Promise.all([
+      Promise.all(openOffsets.map(o => fetchPage(o, false))),
+      Promise.all(closedOffsets.map(o => fetchPage(o, true))),
+    ]);
+
+    const raw = [...openPages.flat(), ...closedPages.flat()];
 
     if (raw.length === 0) {
       return NextResponse.json({ error: "Gamma API error: no data" }, { status: 502 });
     }
 
-    const markets = raw
+    // Deduplicar por ID
+    const seen = new Set<string>();
+    const unique = raw.filter(m => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+
+    const markets = unique
       .map((m: any) => {
         let prices: number[] = [];
         try {
@@ -49,7 +64,6 @@ export async function GET(req: NextRequest) {
 
         const vol = typeof m.volume === "string" ? parseFloat(m.volume) : (m.volume ?? 0);
 
-        // Parsear fecha — si viene solo YYYY-MM-DD tratar como fin del día UTC
         let endDate = m.endDate ?? m.endDateIso ?? "";
         let endTime: number;
         if (endDate) {
@@ -63,14 +77,11 @@ export async function GET(req: NextRequest) {
         }
         const daysLeft = (endTime - now.getTime()) / (1000 * 60 * 60 * 24);
 
-        // URL correcta
         const slug = m.slug ?? "";
         const eventSlug = m.events?.[0]?.slug ?? "";
         const url = eventSlug
           ? `https://polymarket.com/event/${eventSlug}`
-          : slug
-          ? `https://polymarket.com/event/${slug}`
-          : `https://polymarket.com`;
+          : slug ? `https://polymarket.com/event/${slug}` : `https://polymarket.com`;
 
         return {
           id: m.id,
@@ -95,13 +106,13 @@ export async function GET(req: NextRequest) {
         (m: any) =>
           m.bestProb >= minProb &&
           m.volume >= minVol &&
-          m.daysLeft > -0.1 &&
+          m.daysLeft > -0.5 &&
           m.daysLeft <= maxDays
       )
       .sort((a: any, b: any) => a.daysLeft - b.daysLeft);
 
     const categories = Array.from(
-      new Set(raw.map((m: any) => m.category ?? "").filter(Boolean))
+      new Set(unique.map((m: any) => m.category ?? "").filter(Boolean))
     ).sort();
 
     return NextResponse.json({ markets, categories, fetchedAt: now.toISOString() });
@@ -111,20 +122,8 @@ export async function GET(req: NextRequest) {
 }
 
 export interface ProcessedMarket {
-  id: string;
-  question: string;
-  slug: string;
-  url: string;
-  category: string;
-  endDate: string;
-  daysLeft: number;
-  bestProb: number;
-  bestOutcomeName: string;
-  volume: number;
-  volume24hr: number;
-  bestBid: number;
-  bestAsk: number;
-  spread: number;
-  lastTradePrice: number;
-  oneDayPriceChange: number;
+  id: string; question: string; slug: string; url: string; category: string;
+  endDate: string; daysLeft: number; bestProb: number; bestOutcomeName: string;
+  volume: number; volume24hr: number; bestBid: number; bestAsk: number;
+  spread: number; lastTradePrice: number; oneDayPriceChange: number;
 }
