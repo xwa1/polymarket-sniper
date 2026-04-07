@@ -341,7 +341,7 @@ export default function Home() {
                   {active && <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#818cf8", display: "inline-block" }} />}
                   {label}
                 </label>
-                <select value={val} onChange={e => onChange(isNaN(parseFloat(e.target.value)) ? e.target.value : parseFloat(e.target.value))}
+                <select value={val as string} onChange={e => { const v = e.target.value; onChange(isNaN(parseFloat(v)) ? v : parseFloat(v)); }}
                   style={{ width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${active ? "rgba(129,140,248,0.3)" : "rgba(255,255,255,0.08)"}`, borderRadius: 9, color: "#d1d5db", fontSize: 13 }}>
                   {opts.map((o: any) => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
                 </select>
