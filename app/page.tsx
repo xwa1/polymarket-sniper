@@ -330,23 +330,40 @@ export default function Home() {
       <section style={{ marginBottom: "1.5rem" }}>
         <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: "1.25rem" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 14 }}>
-            {[
-              { label: "Probabilidad", opts: PROB_OPTS, val: filters.minProb, active: sortKey === "prob", onChange: (v: number) => handleProbChange(v) },
-              { label: "Cierra en", opts: DAYS_OPTS, val: filters.maxDays, active: sortKey === "days", onChange: (v: number) => handleDaysChange(v) },
-              { label: "Volumen mín.", opts: VOL_OPTS, val: filters.minVol, active: sortKey === "volume", onChange: (v: number) => handleVolChange(v) },
-              { label: "Categoría", opts: CATEGORIES.map(c => ({ label: c.label, value: c.value as any })), val: filters.category, active: false, onChange: (v: any) => setFilters(f => ({ ...f, category: v })) },
-            ].map(({ label, opts, val, active, onChange }) => (
-              <div key={label}>
-                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: active ? "#818cf8" : "#4b5563", marginBottom: 6, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                  {active && <span style={{ width: 4, height: 4, borderRadius: "50%", background: "#818cf8", display: "inline-block" }} />}
-                  {label}
-                </label>
-                <select value={val as string} onChange={e => { const v = e.target.value; onChange(isNaN(parseFloat(v)) ? v : parseFloat(v)); }}
-                  style={{ width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.04)", border: `1px solid ${active ? "rgba(129,140,248,0.3)" : "rgba(255,255,255,0.08)"}`, borderRadius: 9, color: "#d1d5db", fontSize: 13 }}>
-                  {opts.map((o: any) => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
-                </select>
-              </div>
-            ))}
+            {/* Probabilidad */}
+            <div>
+              <label style={filterLabelStyle(sortKey === "prob")}>
+                {sortKey === "prob" && <span style={dotStyle} />}Probabilidad
+              </label>
+              <select value={filters.minProb} onChange={e => handleProbChange(parseFloat(e.target.value))} style={selectStyle(sortKey === "prob")}>
+                {PROB_OPTS.map(o => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
+              </select>
+            </div>
+            {/* Cierra en */}
+            <div>
+              <label style={filterLabelStyle(sortKey === "days")}>
+                {sortKey === "days" && <span style={dotStyle} />}Cierra en
+              </label>
+              <select value={filters.maxDays} onChange={e => handleDaysChange(parseFloat(e.target.value))} style={selectStyle(sortKey === "days")}>
+                {DAYS_OPTS.map(o => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
+              </select>
+            </div>
+            {/* Volumen */}
+            <div>
+              <label style={filterLabelStyle(sortKey === "volume")}>
+                {sortKey === "volume" && <span style={dotStyle} />}Volumen mín.
+              </label>
+              <select value={filters.minVol} onChange={e => handleVolChange(parseFloat(e.target.value))} style={selectStyle(sortKey === "volume")}>
+                {VOL_OPTS.map(o => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
+              </select>
+            </div>
+            {/* Categoría */}
+            <div>
+              <label style={filterLabelStyle(false)}>Categoría</label>
+              <select value={filters.category} onChange={e => setFilters(f => ({ ...f, category: e.target.value }))} style={selectStyle(false)}>
+                {CATEGORIES.map(c => <option key={c.value} value={c.value} style={{ background: "#111" }}>{c.label}</option>)}
+              </select>
+            </div>
           </div>
           <button onClick={() => fetchMarkets(false)} disabled={loading} className="search-btn"
             style={{ width: "100%", padding: "11px", background: loading ? "rgba(99,102,241,0.3)" : "rgba(99,102,241,0.75)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 11, color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "default" : "pointer", letterSpacing: "0.01em" }}>
@@ -443,6 +460,20 @@ export default function Home() {
     </main>
   );
 }
+
+// ── Estilos de filtros ────────────────────────────────────────────────────────
+const dotStyle: React.CSSProperties = { width: 4, height: 4, borderRadius: "50%", background: "#818cf8", display: "inline-block", marginRight: 2 };
+const filterLabelStyle = (active: boolean): React.CSSProperties => ({
+  display: "flex", alignItems: "center", gap: 5, fontSize: 10,
+  color: active ? "#818cf8" : "#4b5563", marginBottom: 6,
+  fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em",
+});
+const selectStyle = (active: boolean): React.CSSProperties => ({
+  width: "100%", padding: "8px 10px",
+  background: "rgba(255,255,255,0.04)",
+  border: `1px solid ${active ? "rgba(129,140,248,0.3)" : "rgba(255,255,255,0.08)"}`,
+  borderRadius: 9, color: "#d1d5db", fontSize: 13,
+});
 
 // ── Market Card ───────────────────────────────────────────────────────────────
 function MarketCard({ market: m, isNew, rank }: { market: ProcessedMarket; isNew: boolean; rank: number }) {
