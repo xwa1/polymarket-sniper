@@ -25,9 +25,9 @@ type SortKey = "prob" | "days" | "volume" | "gain";
 interface Filters { minProb: number; maxDays: number; minVol: number; category: string; }
 
 const CATEGORIES = [
-  { value: "", label: "Todas las categorías" },
+  { value: "", label: "Todas" },
   { value: "Sports", label: "Deportes" },
-  { value: "Crypto", label: "Criptomonedas" },
+  { value: "Crypto", label: "Cripto" },
   { value: "Politics", label: "Política" },
   { value: "Weather", label: "Clima" },
   { value: "Finance", label: "Finanzas" },
@@ -58,18 +58,11 @@ const DAYS_OPTS = [
 ];
 
 const VOL_OPTS = [
-  { label: "Cualquiera", value: 0 },
-  { label: "$1K+", value: 1000 },
-  { label: "$10K+", value: 10000 },
-  { label: "$50K+", value: 50000 },
-  { label: "$100K+", value: 100000 },
-];
-
-const SORT_OPTS: [SortKey, string][] = [
-  ["prob", "Probabilidad"],
-  ["days", "Tiempo"],
-  ["volume", "Volumen"],
-  ["gain", "Ganancia"],
+  { label: "Cualquiera", value: 0, sort: "prob" as SortKey },
+  { label: "$1K+", value: 1000, sort: "volume" as SortKey },
+  { label: "$10K+", value: 10000, sort: "volume" as SortKey },
+  { label: "$50K+", value: 50000, sort: "volume" as SortKey },
+  { label: "$100K+", value: 100000, sort: "volume" as SortKey },
 ];
 
 export default function Home() {
@@ -135,6 +128,25 @@ export default function Home() {
     if (next && typeof Notification !== "undefined" && Notification.permission === "default") Notification.requestPermission();
   };
 
+  // Cambio de volumen → ordenar por volumen automáticamente
+  const handleVolChange = (val: number) => {
+    const opt = VOL_OPTS.find(o => o.value === val);
+    setFilters(f => ({ ...f, minVol: val }));
+    if (opt) setSortKey(opt.sort);
+  };
+
+  // Cambio de probabilidad → ordenar por probabilidad
+  const handleProbChange = (val: number) => {
+    setFilters(f => ({ ...f, minProb: val }));
+    setSortKey("prob");
+  };
+
+  // Cambio de días → ordenar por tiempo restante
+  const handleDaysChange = (val: number) => {
+    setFilters(f => ({ ...f, maxDays: val }));
+    setSortKey("days");
+  };
+
   const sorted = [...markets].sort((a, b) => {
     if (sortKey === "prob") return b.bestProb - a.bestProb;
     if (sortKey === "days") return a.daysLeft - b.daysLeft;
@@ -147,168 +159,307 @@ export default function Home() {
   const totalVol = markets.reduce((s, m) => s + m.volume, 0);
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: "2rem 1rem", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <main style={{ maxWidth: 920, margin: "0 auto", padding: "2.5rem 1.5rem", fontFamily: "'DM Sans', system-ui, sans-serif" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
-        * { box-sizing: border-box; }
-        body { background: #0a0a0f; color: #e8e8f0; }
-        select, button { font-family: inherit; }
-        select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px !important; }
-        .card:hover { border-color: rgba(99,102,241,0.4) !important; }
-        .sort-btn:hover { background: rgba(99,102,241,0.15) !important; }
-        .search-btn:hover { background: rgba(99,102,241,0.9) !important; transform: translateY(-1px); }
-        .poly-link:hover { background: rgba(99,102,241,0.15) !important; color: #a5b4fc !important; }
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #07070e; color: #e2e2ee; }
+        select, button, input { font-family: inherit; }
+        select {
+          appearance: none;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23555' d='M5 7L0 2h10z'/%3E%3C/svg%3E");
+          background-repeat: no-repeat;
+          background-position: right 10px center;
+          padding-right: 28px !important;
+          cursor: pointer;
+        }
+        select:focus { outline: none; border-color: rgba(129,140,248,0.5) !important; }
+        .mcard { transition: border-color 0.2s, transform 0.1s; }
+        .mcard:hover { border-color: rgba(129,140,248,0.35) !important; transform: translateY(-1px); }
+        .sort-pill { transition: all 0.15s; cursor: pointer; }
+        .sort-pill:hover { border-color: rgba(129,140,248,0.4) !important; color: #a5b4fc !important; }
+        .search-btn { transition: all 0.15s; }
+        .search-btn:hover:not(:disabled) { background: rgba(99,102,241,0.95) !important; box-shadow: 0 0 24px rgba(99,102,241,0.3); }
+        .poly-link { transition: all 0.12s; }
+        .poly-link:hover { background: rgba(129,140,248,0.15) !important; color: #c7d2fe !important; border-color: rgba(129,140,248,0.4) !important; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
       `}</style>
 
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "2rem", flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-            <h1 style={{ fontSize: 26, fontWeight: 600, margin: 0, background: "linear-gradient(135deg, #a5b4fc, #818cf8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-              Polymarket Sniper
-            </h1>
-            {alertCount > 0 && (
-              <span onClick={() => setAlertCount(0)} style={{ fontSize: 11, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 99, padding: "3px 10px", cursor: "pointer", fontWeight: 500 }}>
-                +{alertCount} nuevo{alertCount > 1 ? "s" : ""}
+      {/* ── HEADER ── */}
+      <header style={{ marginBottom: "2.5rem" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            {/* Logo / Título */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
+                ◎
+              </div>
+              <h1 style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em", background: "linear-gradient(135deg, #c7d2fe 0%, #a5b4fc 50%, #818cf8 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                Polymarket Sniper
+              </h1>
+              {alertCount > 0 && (
+                <span onClick={() => setAlertCount(0)}
+                  style={{ fontSize: 11, background: "rgba(239,68,68,0.12)", color: "#fca5a5", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 99, padding: "3px 10px", cursor: "pointer", fontWeight: 600, letterSpacing: "0.02em" }}>
+                  +{alertCount} nuevo{alertCount > 1 ? "s" : ""}
+                </span>
+              )}
+            </div>
+            <p style={{ fontSize: 14, color: "#4b5563", lineHeight: 1.5 }}>
+              Detecta mercados de alta probabilidad próximos a resolverse.
+              {fetchedAt && (
+                <span style={{ color: "#374151" }}>
+                  {" "}Actualizado a las {new Date(fetchedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </p>
+          </div>
+
+          {/* Auto-refresh */}
+          {searched && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 4 }}>
+              {autoRefresh && (
+                <span style={{ fontSize: 12, color: "#374151", fontFamily: "'DM Mono', monospace", letterSpacing: "0.04em" }}>
+                  {fmtCountdown(countdown)}
+                </span>
+              )}
+              <button onClick={handleAutoRefresh} style={{
+                fontSize: 12, padding: "7px 16px",
+                border: `1px solid ${autoRefresh ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"}`,
+                borderRadius: 99,
+                background: autoRefresh ? "rgba(99,102,241,0.12)" : "transparent",
+                color: autoRefresh ? "#a5b4fc" : "#6b7280",
+                cursor: "pointer", fontWeight: 500,
+              }}>
+                {autoRefresh ? "● Auto-refresh ON" : "Auto-refresh OFF"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Separador */}
+        <div style={{ marginTop: "1.5rem", height: 1, background: "linear-gradient(90deg, rgba(99,102,241,0.3) 0%, rgba(99,102,241,0.05) 60%, transparent 100%)" }} />
+      </header>
+
+      {/* ── FILTROS ── */}
+      <section style={{ marginBottom: "1.75rem" }}>
+        <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 18, padding: "1.5rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 14, marginBottom: 16 }}>
+            {/* Probabilidad */}
+            <FilterGroup label="Probabilidad mínima" active={sortKey === "prob"}>
+              <select value={filters.minProb} onChange={e => handleProbChange(parseFloat(e.target.value))}
+                style={selectStyle}>
+                {PROB_OPTS.map(o => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
+              </select>
+            </FilterGroup>
+
+            {/* Cierre */}
+            <FilterGroup label="Cierra en" active={sortKey === "days"}>
+              <select value={filters.maxDays} onChange={e => handleDaysChange(parseFloat(e.target.value))}
+                style={selectStyle}>
+                {DAYS_OPTS.map(o => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
+              </select>
+            </FilterGroup>
+
+            {/* Volumen */}
+            <FilterGroup label="Volumen mínimo" active={sortKey === "volume"}>
+              <select value={filters.minVol} onChange={e => handleVolChange(parseFloat(e.target.value))}
+                style={selectStyle}>
+                {VOL_OPTS.map(o => <option key={o.value} value={o.value} style={{ background: "#111" }}>{o.label}</option>)}
+              </select>
+            </FilterGroup>
+
+            {/* Categoría */}
+            <FilterGroup label="Categoría" active={false}>
+              <select value={filters.category} onChange={e => setFilters(f => ({ ...f, category: e.target.value }))}
+                style={selectStyle}>
+                {CATEGORIES.map(c => <option key={c.value} value={c.value} style={{ background: "#111" }}>{c.label}</option>)}
+              </select>
+            </FilterGroup>
+          </div>
+
+          <button onClick={() => fetchMarkets(false)} disabled={loading} className="search-btn"
+            style={{ width: "100%", padding: "12px", background: loading ? "rgba(99,102,241,0.3)" : "rgba(99,102,241,0.75)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 12, color: "#fff", fontSize: 15, fontWeight: 600, cursor: loading ? "default" : "pointer", letterSpacing: "0.01em" }}>
+            {loading ? "Buscando mercados..." : "Buscar mercados →"}
+          </button>
+        </div>
+      </section>
+
+      {/* Error */}
+      {error && (
+        <div style={{ padding: "12px 16px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 12, color: "#fca5a5", fontSize: 13, marginBottom: "1.5rem" }}>
+          {error}
+        </div>
+      )}
+
+      {/* ── MÉTRICAS ── */}
+      {searched && !loading && (
+        <section style={{ marginBottom: "1.75rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+            {[
+              { label: "Mercados encontrados", value: String(markets.length), accent: false },
+              { label: "Probabilidad media", value: markets.length ? fmtPct(avgProb) : "—", accent: true },
+              { label: "Volumen total", value: totalVol > 0 ? fmtVol(totalVol) : "—", accent: false },
+              { label: "Ganancia media", value: markets.length ? ((1 / avgProb - 1) * 100).toFixed(1) + "%" : "—", accent: true },
+            ].map(({ label, value, accent }) => (
+              <div key={label} style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: "16px 18px" }}>
+                <div style={{ fontSize: 24, fontWeight: 600, color: accent ? "#a5b4fc" : "#e2e2ee", fontFamily: "'DM Mono', monospace", letterSpacing: "-0.02em" }}>{value}</div>
+                <div style={{ fontSize: 11, color: "#4b5563", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── SORT BAR ── */}
+      {sorted.length > 0 && (
+        <section style={{ marginBottom: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "#374151", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600, marginRight: 4 }}>Ordenar por</span>
+            {([
+              ["prob", "Probabilidad ↓"],
+              ["days", "Tiempo restante ↑"],
+              ["volume", "Volumen ↓"],
+              ["gain", "Ganancia ↓"],
+            ] as [SortKey, string][]).map(([key, label]) => (
+              <button key={key} onClick={() => setSortKey(key)} className="sort-pill"
+                style={{ fontSize: 12, padding: "5px 14px", border: `1px solid ${sortKey === key ? "rgba(129,140,248,0.5)" : "rgba(255,255,255,0.07)"}`, borderRadius: 99, background: sortKey === key ? "rgba(99,102,241,0.18)" : "transparent", color: sortKey === key ? "#a5b4fc" : "#6b7280", fontWeight: sortKey === key ? 600 : 400 }}>
+                {label}
+              </button>
+            ))}
+            {newIds.size > 0 && (
+              <span style={{ marginLeft: "auto", fontSize: 11, color: "#fca5a5", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 99, padding: "4px 12px", fontWeight: 500 }}>
+                {newIds.size} nuevo{newIds.size > 1 ? "s" : ""} en este refresh
               </span>
             )}
           </div>
-          <p style={{ fontSize: 13, color: "#6b7280", margin: 0 }}>
-            Mercados de alta probabilidad próximos a resolverse
-            {fetchedAt && <span style={{ color: "#4b5563" }}> · {new Date(fetchedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</span>}
-          </p>
-        </div>
-        {searched && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {autoRefresh && <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "'DM Mono', monospace" }}>{fmtCountdown(countdown)}</span>}
-            <button onClick={handleAutoRefresh} style={{ fontSize: 12, padding: "6px 14px", border: `1px solid ${autoRefresh ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.1)"}`, borderRadius: 99, background: autoRefresh ? "rgba(99,102,241,0.15)" : "transparent", color: autoRefresh ? "#a5b4fc" : "#9ca3af", cursor: "pointer", fontWeight: 500 }}>
-              {autoRefresh ? "● Auto ON" : "Auto OFF"}
-            </button>
+          <div style={{ marginTop: "0.75rem", height: 1, background: "rgba(255,255,255,0.04)" }} />
+        </section>
+      )}
+
+      {/* ── LISTA ── */}
+      <section>
+        {loading && (
+          <div style={{ textAlign: "center", padding: "4rem 0", color: "#374151" }}>
+            <div style={{ fontSize: 14 }}>Consultando Polymarket API...</div>
           </div>
         )}
-      </div>
-
-      {/* Filtros */}
-      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "1.25rem", marginBottom: "1.5rem" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10, marginBottom: 12 }}>
-          {[
-            { label: "Probabilidad", opts: PROB_OPTS, key: "minProb" as keyof Filters },
-            { label: "Cierra en", opts: DAYS_OPTS, key: "maxDays" as keyof Filters },
-            { label: "Volumen mín.", opts: VOL_OPTS, key: "minVol" as keyof Filters },
-          ].map(({ label, opts, key }) => (
-            <div key={key}>
-              <label style={{ display: "block", fontSize: 11, color: "#6b7280", marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</label>
-              <select value={filters[key] as number} onChange={e => setFilters(f => ({ ...f, [key]: parseFloat(e.target.value) }))}
-                style={{ width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8e8f0", fontSize: 13 }}>
-                {opts.map(o => <option key={o.value} value={o.value} style={{ background: "#1a1a2e" }}>{o.label}</option>)}
-              </select>
-            </div>
-          ))}
-          <div>
-            <label style={{ display: "block", fontSize: 11, color: "#6b7280", marginBottom: 6, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.05em" }}>Categoría</label>
-            <select value={filters.category} onChange={e => setFilters(f => ({ ...f, category: e.target.value }))}
-              style={{ width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e8e8f0", fontSize: 13 }}>
-              {CATEGORIES.map(c => <option key={c.value} value={c.value} style={{ background: "#1a1a2e" }}>{c.label}</option>)}
-            </select>
+        {!loading && searched && sorted.length === 0 && (
+          <div style={{ textAlign: "center", padding: "4rem 0", color: "#374151" }}>
+            <div style={{ fontSize: 15, marginBottom: 8 }}>Sin resultados</div>
+            <div style={{ fontSize: 13 }}>Prueba a ampliar los filtros de probabilidad, días o volumen.</div>
           </div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {!loading && sorted.map((m, i) => <MarketCard key={m.id} market={m} isNew={newIds.has(m.id)} rank={i + 1} />)}
         </div>
-        <button onClick={() => fetchMarkets(false)} disabled={loading}
-          className="search-btn"
-          style={{ width: "100%", padding: "10px", background: loading ? "rgba(99,102,241,0.3)" : "rgba(99,102,241,0.8)", border: "none", borderRadius: 10, color: "#fff", fontSize: 14, fontWeight: 600, cursor: loading ? "default" : "pointer", transition: "all 0.15s" }}>
-          {loading ? "Buscando mercados..." : "Buscar mercados →"}
-        </button>
-      </div>
+      </section>
 
-      {error && <div style={{ padding: "12px 16px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, color: "#f87171", fontSize: 13, marginBottom: "1rem" }}>{error}</div>}
-
-      {/* Métricas */}
-      {searched && !loading && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: "1.5rem" }}>
-          {[
-            { label: "Mercados", value: String(markets.length) },
-            { label: "Prob. media", value: markets.length ? fmtPct(avgProb) : "—" },
-            { label: "Volumen total", value: totalVol > 0 ? fmtVol(totalVol) : "—" },
-            { label: "Ganancia media", value: markets.length ? ((1 / avgProb - 1) * 100).toFixed(1) + "%" : "—" },
-          ].map(({ label, value }) => (
-            <div key={label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "14px 16px" }}>
-              <div style={{ fontSize: 22, fontWeight: 600, color: "#e8e8f0", fontFamily: "'DM Mono', monospace" }}>{value}</div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Sort */}
+      {/* Footer */}
       {sorted.length > 0 && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 4 }}>Ordenar</span>
-          {SORT_OPTS.map(([key, label]) => (
-            <button key={key} onClick={() => setSortKey(key)} className="sort-btn"
-              style={{ fontSize: 12, padding: "5px 12px", border: `1px solid ${sortKey === key ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"}`, borderRadius: 99, background: sortKey === key ? "rgba(99,102,241,0.2)" : "transparent", color: sortKey === key ? "#a5b4fc" : "#9ca3af", cursor: "pointer", fontWeight: sortKey === key ? 600 : 400, transition: "all 0.1s" }}>
-              {label}
-            </button>
-          ))}
-          {newIds.size > 0 && <span style={{ marginLeft: "auto", fontSize: 11, color: "#f87171", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 99, padding: "4px 10px" }}>{newIds.size} nuevo{newIds.size > 1 ? "s" : ""}</span>}
-        </div>
+        <footer style={{ marginTop: "3rem", paddingTop: "1.5rem", borderTop: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
+          <span style={{ fontSize: 12, color: "#1f2937" }}>Polymarket Sniper · Datos en tiempo real via Gamma API · {sorted.length} mercados</span>
+        </footer>
       )}
-
-      {/* Lista */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {loading && <div style={{ textAlign: "center", padding: "3rem", color: "#6b7280" }}>Consultando Polymarket...</div>}
-        {!loading && searched && sorted.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#6b7280" }}>No se encontraron mercados. Prueba a ampliar los filtros.</div>}
-        {!loading && sorted.map(m => <MarketCard key={m.id} market={m} isNew={newIds.has(m.id)} />)}
-      </div>
     </main>
   );
 }
 
-function MarketCard({ market: m, isNew }: { market: ProcessedMarket; isNew: boolean }) {
+// ── Estilos reutilizables ────────────────────────────────────────────────────
+
+const selectStyle: React.CSSProperties = {
+  width: "100%", padding: "9px 10px",
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 10, color: "#d1d5db", fontSize: 13,
+};
+
+function FilterGroup({ label, children, active }: { label: string; children: React.ReactNode; active: boolean }) {
+  return (
+    <div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: active ? "#818cf8" : "#4b5563", marginBottom: 7, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        {active && <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#818cf8", display: "inline-block", flexShrink: 0 }} />}
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function MarketCard({ market: m, isNew, rank }: { market: ProcessedMarket; isNew: boolean; rank: number }) {
   const pct = Math.round(m.bestProb * 100);
   const isVH = pct >= 95;
-  const probColor = isVH ? "#4ade80" : pct >= 90 ? "#86efac" : "#a3e635";
-  const probBg = isVH ? "rgba(74,222,128,0.1)" : "rgba(163,230,53,0.08)";
-  const probBorder = isVH ? "rgba(74,222,128,0.3)" : "rgba(163,230,53,0.2)";
+  const isH = pct >= 90;
+  const probColor = isVH ? "#4ade80" : isH ? "#86efac" : "#bef264";
+  const probBg = isVH ? "rgba(74,222,128,0.08)" : "rgba(190,242,100,0.06)";
+  const probBorder = isVH ? "rgba(74,222,128,0.25)" : "rgba(190,242,100,0.15)";
+  const gain = ((1 / m.bestProb - 1) * 100).toFixed(1);
 
   return (
-    <div className="card" style={{ background: isNew ? "rgba(99,102,241,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${isNew ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, padding: "1rem 1.25rem", position: "relative", transition: "border-color 0.15s" }}>
-      {isNew && <span style={{ position: "absolute", top: -10, left: 16, fontSize: 10, fontWeight: 600, background: "#6366f1", color: "#fff", borderRadius: 99, padding: "2px 8px", letterSpacing: "0.06em" }}>NUEVO</span>}
+    <div className="mcard" style={{
+      background: isNew ? "rgba(99,102,241,0.04)" : "rgba(255,255,255,0.015)",
+      border: `1px solid ${isNew ? "rgba(99,102,241,0.35)" : "rgba(255,255,255,0.06)"}`,
+      borderRadius: 16, padding: "1.1rem 1.25rem", position: "relative",
+    }}>
+      {isNew && (
+        <span style={{ position: "absolute", top: -10, left: 18, fontSize: 10, fontWeight: 700, background: "#6366f1", color: "#fff", borderRadius: 99, padding: "2px 9px", letterSpacing: "0.08em" }}>
+          NUEVO
+        </span>
+      )}
 
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 10 }}>
-        {/* Badge prob */}
-        <div style={{ flexShrink: 0, width: 58, height: 58, borderRadius: 12, background: probBg, border: `1px solid ${probBorder}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 16, fontWeight: 600, color: probColor, fontFamily: "'DM Mono', monospace" }}>{pct}%</span>
-          <span style={{ fontSize: 9, color: probColor, opacity: 0.7, fontWeight: 500 }}>{m.bestOutcomeName}</span>
+      {/* Número de ranking sutil */}
+      <span style={{ position: "absolute", top: 14, right: 16, fontSize: 11, color: "#1f2937", fontFamily: "'DM Mono', monospace" }}>#{rank}</span>
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 12 }}>
+        {/* Badge probabilidad */}
+        <div style={{ flexShrink: 0, width: 62, height: 62, borderRadius: 14, background: probBg, border: `1px solid ${probBorder}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2 }}>
+          <span style={{ fontSize: 17, fontWeight: 700, color: probColor, fontFamily: "'DM Mono', monospace", lineHeight: 1 }}>{pct}%</span>
+          <span style={{ fontSize: 9, color: probColor, opacity: 0.65, fontWeight: 600, letterSpacing: "0.04em" }}>{m.bestOutcomeName.toUpperCase()}</span>
         </div>
-        {/* Pregunta */}
-        <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 14, color: "#d1d5db", lineHeight: 1.5, margin: 0, marginBottom: 4 }}>{m.question}</p>
-          {m.oneDayPriceChange !== 0 && (
-            <span style={{ fontSize: 11, color: m.oneDayPriceChange > 0 ? "#4ade80" : "#f87171", fontFamily: "'DM Mono', monospace" }}>
-              {m.oneDayPriceChange > 0 ? "▲" : "▼"} {Math.abs(m.oneDayPriceChange * 100).toFixed(1)}% hoy
-            </span>
-          )}
+
+        {/* Pregunta + variación */}
+        <div style={{ flex: 1, paddingRight: 24 }}>
+          <p style={{ fontSize: 14, color: "#c9cad6", lineHeight: 1.55, marginBottom: 6, fontWeight: 400 }}>{m.question}</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {m.oneDayPriceChange !== 0 && (
+              <span style={{ fontSize: 11, color: m.oneDayPriceChange > 0 ? "#4ade80" : "#f87171", fontFamily: "'DM Mono', monospace", fontWeight: 500 }}>
+                {m.oneDayPriceChange > 0 ? "▲" : "▼"} {Math.abs(m.oneDayPriceChange * 100).toFixed(1)}% hoy
+              </span>
+            )}
+            {m.category && (
+              <span style={{ fontSize: 11, color: "#374151", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 6, padding: "2px 8px" }}>
+                {m.category}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Tags */}
+      {/* Separador interno */}
+      <div style={{ height: 1, background: "rgba(255,255,255,0.04)", marginBottom: 10 }} />
+
+      {/* Stats row */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        <Tag color="time">⏱ {fmtDays(m.daysLeft)}</Tag>
-        <Tag color="vol">⬡ {fmtVol(m.volume)}</Tag>
-        {m.volume24hr > 0 && <Tag color="muted">{fmtVol(m.volume24hr)}/24h</Tag>}
-        {m.category && <Tag color="cat">{m.category}</Tag>}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 12, color: "#6b7280" }}>
-            ganancia: <span style={{ color: "#4ade80", fontWeight: 600, fontFamily: "'DM Mono', monospace" }}>+{fmtGain(m.bestProb)}</span>
-          </span>
+        <Chip icon="⏱" label={fmtDays(m.daysLeft)} color="orange" />
+        <Chip icon="◈" label={fmtVol(m.volume)} color="indigo" />
+        {m.volume24hr > 0 && <Chip icon="" label={`${fmtVol(m.volume24hr)}/24h`} color="muted" />}
+
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11, color: "#374151", letterSpacing: "0.02em" }}>ganancia potencial</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#4ade80", fontFamily: "'DM Mono', monospace", lineHeight: 1.2 }}>+{gain}%</div>
+          </div>
           <a href={m.url} target="_blank" rel="noopener noreferrer" className="poly-link"
-            style={{ fontSize: 11, color: "#818cf8", textDecoration: "none", padding: "4px 10px", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, transition: "all 0.1s" }}>
+            style={{ fontSize: 12, color: "#818cf8", textDecoration: "none", padding: "7px 14px", border: "1px solid rgba(129,140,248,0.25)", borderRadius: 10, fontWeight: 500, whiteSpace: "nowrap" }}>
             Ver →
           </a>
         </div>
       </div>
 
+      {/* Spread */}
       {m.bestBid > 0 && m.bestAsk > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.05)", fontSize: 11, color: "#4b5563", fontFamily: "'DM Mono', monospace" }}>
+        <div style={{ marginTop: 8, fontSize: 11, color: "#1f2937", fontFamily: "'DM Mono', monospace" }}>
           bid {fmtPct(m.bestBid)} · ask {fmtPct(m.bestAsk)} · spread {(m.spread * 100).toFixed(1)}%
         </div>
       )}
@@ -316,14 +467,15 @@ function MarketCard({ market: m, isNew }: { market: ProcessedMarket; isNew: bool
   );
 }
 
-function Tag({ children, color }: { children: React.ReactNode; color: "time" | "vol" | "muted" | "cat" }) {
-  const styles: Record<string, React.CSSProperties> = {
-    time: { background: "rgba(251,146,60,0.1)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.2)" },
-    vol:  { background: "rgba(99,102,241,0.1)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.2)" },
-    muted:{ background: "rgba(255,255,255,0.04)", color: "#6b7280", border: "1px solid rgba(255,255,255,0.07)" },
-    cat:  { background: "rgba(255,255,255,0.04)", color: "#9ca3af", border: "1px solid rgba(255,255,255,0.07)" },
+function Chip({ icon, label, color }: { icon: string; label: string; color: "orange" | "indigo" | "muted" }) {
+  const s: Record<string, React.CSSProperties> = {
+    orange: { background: "rgba(251,146,60,0.08)", color: "#fb923c", border: "1px solid rgba(251,146,60,0.18)" },
+    indigo: { background: "rgba(99,102,241,0.08)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.18)" },
+    muted:  { background: "rgba(255,255,255,0.03)", color: "#374151", border: "1px solid rgba(255,255,255,0.05)" },
   };
   return (
-    <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 99, fontWeight: 500, ...styles[color] }}>{children}</span>
+    <span style={{ fontSize: 12, padding: "4px 10px", borderRadius: 8, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 4, ...s[color] }}>
+      {icon && <span style={{ fontSize: 10 }}>{icon}</span>}{label}
+    </span>
   );
 }
