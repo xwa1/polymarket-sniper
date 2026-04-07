@@ -296,6 +296,7 @@ export default function Home() {
           value={filters.minProb}
           onChange={(v) => setFilters((f) => ({ ...f, minProb: v }))}
           options={[
+            { label: "80%+", value: 0.80 },
             { label: "85%+", value: 0.85 },
             { label: "90%+", value: 0.9 },
             { label: "93%+", value: 0.93 },
@@ -308,11 +309,11 @@ export default function Home() {
           value={filters.maxDays}
           onChange={(v) => setFilters((f) => ({ ...f, maxDays: v }))}
           options={[
-           { label: "≤ 1 día", value: 1 },
-{ label: "≤ 2 días", value: 2 },
-{ label: "≤ 7 días", value: 7 },
-{ label: "≤ 14 días", value: 14 },
-{ label: "≤ 30 días", value: 30 },
+            { label: "≤ 12 horas", value: 0.5 },
+            { label: "≤ 1 día", value: 1 },
+            { label: "≤ 2 días", value: 2 },
+            { label: "≤ 3 días", value: 3 },
+            { label: "≤ 7 días", value: 7 },
           ]}
         />
         <FilterSelect
@@ -328,7 +329,7 @@ export default function Home() {
           ]}
         />
 
-        {/* Categoría — se puebla con datos reales de la API */}
+        {/* Categoría — lista fija de categorías de Polymarket */}
         <div>
           <label
             style={{
@@ -357,11 +358,16 @@ export default function Home() {
             }}
           >
             <option value="">Todas</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
+            <option value="Sports">Deportes</option>
+            <option value="Crypto">Criptomonedas</option>
+            <option value="Politics">Política</option>
+            <option value="Weather">Clima</option>
+            <option value="Finance">Finanzas</option>
+            <option value="Entertainment">Entretenimiento</option>
+            <option value="Science">Ciencia</option>
+            <option value="Technology">Tecnología</option>
+            <option value="World">Internacional</option>
+            <option value="Business">Negocios</option>
           </select>
         </div>
 
@@ -622,7 +628,7 @@ function MarketCard({
 }) {
   const pct = Math.round(m.bestProb * 100);
   const isVeryHigh = pct >= 95;
-  const url = `https://polymarket.com/event/${m.slug}`;
+  const url = m.url ?? `https://polymarket.com/event/${m.slug}`;
 
   return (
     <div
