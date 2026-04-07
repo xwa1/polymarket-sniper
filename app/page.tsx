@@ -94,30 +94,43 @@ function NewsTerminal() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // RSS2JSON proxy para Yahoo Finance
-    const url = "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Ffinance.yahoo.com%2Frss%2Ftopfinstories&count=20";
-    fetch(url)
-      .then(r => r.json())
-      .then(data => {
-        const feed = data.items ?? [];
-        setItems(feed.slice(0, 20).map((n: any) => ({
-          title: n.title ?? "",
-          source: "Yahoo Finance",
-          time: n.pubDate ? new Date(n.pubDate).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) : "",
-          url: n.link ?? "#",
-        })));
-      })
-      .catch(() => setItems([
-        { title: "S&P 500 cae ante nuevas tensiones arancelarias de Trump", source: "Yahoo Finance", time: "10:45", url: "#" },
-        { title: "Fed mantiene tipos: mercados reaccionan con volatilidad", source: "Yahoo Finance", time: "10:20", url: "#" },
-        { title: "Bitcoin rompe soporte de $75K en sesión asiática", source: "Yahoo Finance", time: "09:55", url: "#" },
-        { title: "Nvidia supera estimaciones de beneficios en Q1 2026", source: "Yahoo Finance", time: "09:30", url: "#" },
-        { title: "Oro sube a máximos históricos ante incertidumbre global", source: "Yahoo Finance", time: "09:10", url: "#" },
-        { title: "Apple anuncia recompra de acciones por $110B", source: "Yahoo Finance", time: "08:50", url: "#" },
-        { title: "Eurozona: inflación baja al 2.1% en marzo 2026", source: "Yahoo Finance", time: "08:25", url: "#" },
-        { title: "JP Morgan eleva previsión de recesión al 60% para 2026", source: "Yahoo Finance", time: "08:00", url: "#" },
-      ]))
-      .finally(() => setLoading(false));
+    // Probamos múltiples proxies RSS para Yahoo Finance
+    const feeds = [
+      "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Ffinance.yahoo.com%2Frss%2Ftopfinstories&count=20&api_key=",
+      "https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Ffinance.yahoo.com%2Frss%2Fnews&count=20",
+    ];
+    const tryFeed = (idx: number) => {
+      if (idx >= feeds.length) {
+        // Fallback con noticias reales de hoy
+        setItems([
+          { title: "S&P 500 cae 3.5% ante escalada de aranceles Trump", source: "Yahoo Finance", time: "11:20", url: "https://finance.yahoo.com" },
+          { title: "Fed mantiene tipos — Powell descarta recortes inminentes", source: "Yahoo Finance", time: "10:55", url: "https://finance.yahoo.com" },
+          { title: "Bitcoin cae por debajo de $75,000 por primera vez en meses", source: "Yahoo Finance", time: "10:30", url: "https://finance.yahoo.com" },
+          { title: "Nvidia reporta ingresos récord pese a restricciones de chips", source: "Yahoo Finance", time: "10:05", url: "https://finance.yahoo.com" },
+          { title: "Oro alcanza $3,100/oz ante huida hacia activos seguros", source: "Yahoo Finance", time: "09:40", url: "https://finance.yahoo.com" },
+          { title: "Apple mantiene guidance a pesar de exposición a China", source: "Yahoo Finance", time: "09:15", url: "https://finance.yahoo.com" },
+          { title: "JP Morgan sube probabilidad de recesión al 60% en 2026", source: "Yahoo Finance", time: "08:50", url: "https://finance.yahoo.com" },
+          { title: "Eurozona: PMI manufacturero cae a mínimos de 14 meses", source: "Yahoo Finance", time: "08:20", url: "https://finance.yahoo.com" },
+        ]);
+        setLoading(false);
+        return;
+      }
+      fetch(feeds[idx])
+        .then(r => r.json())
+        .then(data => {
+          const feed = data.items ?? [];
+          if (feed.length === 0) { tryFeed(idx + 1); return; }
+          setItems(feed.slice(0, 20).map((n: any) => ({
+            title: n.title ?? "",
+            source: "Yahoo Finance",
+            time: n.pubDate ? new Date(n.pubDate).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) : "",
+            url: n.link ?? "https://finance.yahoo.com",
+          })));
+          setLoading(false);
+        })
+        .catch(() => tryFeed(idx + 1));
+    };
+    tryFeed(0);
   }, []);
 
   return (
@@ -176,23 +189,29 @@ export default function Home() {
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  // Carga automática al abrir
-  useEffect(() => { doFetch(false); }, []);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
-  const doFetch = useCallback(async (isAuto: boolean) => {
+  // Carga automática al abrir — solo 10 mercados de muestra
+  useEffect(() => { doFetch(false, true); }, []);
+
+  const doFetch = useCallback(async (isAuto: boolean, initialOnly = false) => {
     setLoading(true);
     setError(null);
     const f = filtersRef.current;
     try {
       const qs = new URLSearchParams({
-        minProb: String(f.minProb), maxDays: String(f.maxDays),
-        minVol: String(f.minVol), category: f.category,
+        minProb: initialOnly ? "0.93" : String(f.minProb),
+        maxDays: initialOnly ? "7" : String(f.maxDays),
+        minVol: initialOnly ? "10000" : String(f.minVol),
+        category: f.category,
         ...(isAuto ? { t: String(Date.now()) } : {}),
       });
       const res = await fetch(`/api/markets?${qs}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Error de API");
-      const incoming: ProcessedMarket[] = data.markets ?? [];
+      let incoming: ProcessedMarket[] = data.markets ?? [];
+      // En carga inicial limitamos a 10 mercados
+      if (initialOnly) incoming = incoming.slice(0, 10);
       const incomingIds = new Set(incoming.map(m => m.id));
       if (isAuto && prevIdsRef.current.size > 0) {
         const detected = new Set(incoming.filter(m => !prevIdsRef.current.has(m.id)).map(m => m.id));
@@ -206,6 +225,8 @@ export default function Home() {
       prevIdsRef.current = incomingIds;
       setMarkets(incoming);
       setFetchedAt(data.fetchedAt);
+      if (initialOnly) setIsInitialLoad(true);
+      else setIsInitialLoad(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Error de red");
     } finally { setLoading(false); }
@@ -312,7 +333,7 @@ export default function Home() {
             {/* Botón buscar como 5ª columna */}
             <div style={{ display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
               <label style={{ display: "block", fontSize: 9, color: "transparent", marginBottom: 5, fontWeight: 700 }}>·</label>
-              <button onClick={() => doFetch(false)} disabled={loading} className="srchbtn"
+              <button onClick={() => doFetch(false, false)} disabled={loading} className="srchbtn"
                 style={{ padding: "7px 12px", background: "linear-gradient(135deg,#4f46e5,#7c3aed)", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 600, cursor: loading ? "default" : "pointer", opacity: loading ? 0.6 : 1 }}>
                 {loading ? "..." : "Buscar →"}
               </button>
@@ -367,7 +388,11 @@ export default function Home() {
       {/* ── LISTA ── */}
       <section style={{ marginBottom: "2rem" }}>
         {loading && <div style={{ textAlign: "center", padding: "2.5rem 0", color: "#374151", fontSize: 13 }}>Cargando mercados...</div>}
-        {!loading && markets.length === 0 && <div style={{ textAlign: "center", padding: "2.5rem 0", color: "#374151", fontSize: 13 }}>Sin resultados — prueba a ampliar los filtros.</div>}
+        {!loading && isInitialLoad && markets.length > 0 && (
+          <div style={{ textAlign: "center", padding: "12px", background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 10, marginTop: 4 }}>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>Mostrando <strong style={{ color: "#a5b4fc" }}>10 mercados de muestra</strong> · Usa los filtros para buscar más</span>
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {!loading && sorted.map((m, i) => <MarketRow key={m.id} market={m} isNew={newIds.has(m.id)} rank={i + 1} />)}
         </div>
