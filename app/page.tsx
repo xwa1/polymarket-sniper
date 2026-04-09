@@ -365,8 +365,221 @@ function InsiderTab({ allMarkets }: { allMarkets: ProcessedMarket[] }) {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+// ── Rewards Tab ───────────────────────────────────────────────────────────────
+interface RewardMarket {
+  id: string; question: string; url: string; category: string;
+  rewardsMinSize: number; rewardsMaxSpread: number;
+  spread: number; volume: number; volume24hr: number;
+  liquidity: number; daysLeft: number; dailyRewardEst: number; opportunityScore: number;
+}
+
+function RewardsTab() {
+  const [rewards, setRewards] = useState<RewardMarket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"reward" | "score" | "spread" | "days">("score");
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const pages = await Promise.all(
+        Array.from({ length: 8 }, (_, i) =>
+          fetch(`https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset=${i * 100}&order=id&ascending=false`, {
+            headers: { Accept: "application/json" }, cache: "no-store",
+          }).then(r => r.ok ? r.json() : []).catch(() => [])
+        )
+      );
+      const all: any[] = pages.flat();
+
+      const mapped: RewardMarket[] = all
+        .filter(m => {
+          const minSize = parseFloat(m.rewardsMinSize ?? "0");
+          const maxSpr  = parseFloat(m.rewardsMaxSpread ?? "0");
+          return minSize > 0 && maxSpr > 0 && m.acceptingOrders === true;
+        })
+        .map(m => {
+          const minSize  = parseFloat(m.rewardsMinSize ?? "0");
+          const maxSpr   = parseFloat(m.rewardsMaxSpread ?? "4.5");
+          const spread   = parseFloat(m.spread ?? "1");
+          const vol      = parseFloat(m.volume ?? "0");
+          const vol24    = parseFloat(m.volume24hr ?? "0");
+          const liq      = parseFloat(m.liquidityClob ?? m.liquidity ?? "0");
+          const now      = Date.now();
+          const endTime  = m.endDate ? new Date(m.endDate).getTime() : now + 999 * 86400000;
+          const daysLeft = (endTime - now) / 86400000;
+          const dailyRewardEst = Math.max(0, liq * (maxSpr / 100) * 0.25);
+          const spreadGap   = Math.max(0, maxSpr - spread * 100);
+          const rewardScore = Math.min(40, (dailyRewardEst / 500) * 40);
+          const compScore   = Math.min(30, (spreadGap / Math.max(maxSpr, 1)) * 30);
+          const volScore    = Math.min(20, Math.max(0, 20 - (vol24 / 100000) * 20));
+          const timeScore   = daysLeft > 1 && daysLeft < 30 ? 10 : daysLeft >= 30 ? 5 : 2;
+          const opportunityScore = Math.round(rewardScore + compScore + volScore + timeScore);
+          const slug = m.slug ?? "";
+          const eventSlug = m.events?.[0]?.slug ?? "";
+          const url = eventSlug ? `https://polymarket.com/event/${eventSlug}` : slug ? `https://polymarket.com/event/${slug}` : "https://polymarket.com";
+          return { id: String(m.id), question: m.question ?? "", url, category: m.category ?? "", rewardsMinSize: minSize, rewardsMaxSpread: maxSpr, spread: spread * 100, volume: vol, volume24hr: vol24, liquidity: liq, daysLeft, dailyRewardEst, opportunityScore };
+        })
+        .filter(m => m.dailyRewardEst >= 50 && m.daysLeft > 0);
+
+      setRewards(mapped.sort((a, b) => b.opportunityScore - a.opportunityScore));
+      setFetchedAt(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Error loading rewards");
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sorted = [...rewards].sort((a, b) => {
+    if (sortBy === "reward") return b.dailyRewardEst - a.dailyRewardEst;
+    if (sortBy === "score")  return b.opportunityScore - a.opportunityScore;
+    if (sortBy === "spread") return (b.rewardsMaxSpread - b.spread) - (a.rewardsMaxSpread - a.spread);
+    if (sortBy === "days")   return a.daysLeft - b.daysLeft;
+    return 0;
+  });
+
+  const scoreColor = (s: number) => s >= 70 ? "#34d399" : s >= 45 ? "#fcd34d" : "#9ca3af";
+  const scoreBg    = (s: number) => s >= 70 ? "rgba(52,211,153,0.06)" : s >= 45 ? "rgba(253,224,71,0.04)" : "rgba(255,255,255,0.02)";
+  const scoreBdr   = (s: number) => s >= 70 ? "rgba(52,211,153,0.2)" : s >= 45 ? "rgba(253,224,71,0.12)" : "rgba(255,255,255,0.05)";
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "1.5rem", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <span style={{ fontSize: 20 }}>💎</span>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: "-0.02em" }}>Rewards & Incentives</h2>
+          </div>
+          <p style={{ fontSize: 12, color: "#4b5563" }}>
+            Active liquidity reward markets ≥ $50/day · Sorted by opportunity score
+            {fetchedAt && <span style={{ color: "#374151" }}> · Updated {fetchedAt}</span>}
+          </p>
+        </div>
+        <button onClick={load} disabled={loading}
+          style={{ fontSize: 12, padding: "7px 16px", background: loading ? "rgba(99,102,241,0.2)" : "linear-gradient(135deg,#4f46e5,#7c3aed)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, color: "#fff", fontWeight: 600, cursor: loading ? "default" : "pointer", opacity: loading ? 0.6 : 1 }}>
+          {loading ? "⟳ Loading..." : "↻ Refresh"}
+        </button>
+      </div>
+
+      <div style={{ background: "rgba(52,211,153,0.04)", border: "1px solid rgba(52,211,153,0.12)", borderRadius: 12, padding: "1rem", marginBottom: "1.5rem" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>How rewards work</div>
+        <p style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.65, marginBottom: 10 }}>
+          Polymarket pays liquidity providers who keep orders within the allowed spread. Place orders within <strong style={{ color: "#d1d5db" }}>Max Spread</strong> and above <strong style={{ color: "#d1d5db" }}>Min Order Size</strong> to earn daily rewards. Lower competition = larger share of the pool.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+          {[
+            { label: "🎯 Opportunity Score", desc: "High reward + wide spread + low volume = best opportunity", color: "#34d399" },
+            { label: "💰 Daily Reward Est.", desc: "Estimated daily pool based on liquidity & max spread allowed", color: "#a5b4fc" },
+            { label: "📊 Spread Gap", desc: "How much spread remains before hitting the max — your entry window", color: "#fb923c" },
+          ].map(({ label, desc, color }) => (
+            <div key={label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color, marginBottom: 3 }}>{label}</div>
+              <div style={{ fontSize: 10, color: "#4b5563", lineHeight: 1.5 }}>{desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {error && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, color: "#fca5a5", fontSize: 12, marginBottom: "1rem" }}>{error}</div>}
+
+      {!loading && sorted.length > 0 && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "1rem", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 9, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Sort by:</span>
+            {([{ k: "score" as const, l: "Opportunity ↓" }, { k: "reward" as const, l: "Reward ↓" }, { k: "spread" as const, l: "Spread gap ↓" }, { k: "days" as const, l: "Closes soon ↑" }]).map(({ k, l }) => (
+              <button key={k} onClick={() => setSortBy(k)} className="sbtn"
+                style={{ fontSize: 11, padding: "3px 10px", border: `1px solid ${sortBy === k ? "rgba(52,211,153,0.5)" : "rgba(255,255,255,0.07)"}`, borderRadius: 99, background: sortBy === k ? "rgba(52,211,153,0.12)" : "transparent", color: sortBy === k ? "#34d399" : "#6b7280", fontWeight: sortBy === k ? 600 : 400 }}>
+                {l}
+              </button>
+            ))}
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "#4b5563" }}>{sorted.length} markets found</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: "1.25rem" }}>
+            {[
+              { label: "Markets", value: String(sorted.length), color: "#fff" },
+              { label: "Total rewards/day", value: "$" + Math.round(sorted.reduce((s, m) => s + m.dailyRewardEst, 0)).toLocaleString(), color: "#34d399" },
+              { label: "Avg. opportunity", value: Math.round(sorted.reduce((s, m) => s + m.opportunityScore, 0) / sorted.length) + "/100", color: "#a5b4fc" },
+              { label: "Top reward/day", value: "$" + Math.round(Math.max(...sorted.map(m => m.dailyRewardEst))).toLocaleString(), color: "#fcd34d" },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color, fontFamily: "'JetBrains Mono',monospace" }}>{value}</div>
+                <div style={{ fontSize: 9, color: "#374151", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {loading && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>Loading reward markets...</div>}
+      {!loading && sorted.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>No markets found with rewards ≥ $50/day.</div>}
+
+      {!loading && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {sorted.map((m, i) => {
+            const sc = m.opportunityScore;
+            const spreadGap = Math.max(0, m.rewardsMaxSpread - m.spread);
+            const competition = m.spread < m.rewardsMaxSpread * 0.3 ? "High" : m.spread < m.rewardsMaxSpread * 0.7 ? "Medium" : "Low";
+            const compColor = competition === "Low" ? "#34d399" : competition === "Medium" ? "#fcd34d" : "#f87171";
+            return (
+              <div key={m.id} style={{ background: scoreBg(sc), border: `1px solid ${scoreBdr(sc)}`, borderRadius: 14, padding: "1rem 1.25rem" }} className="mcard">
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 12 }}>
+                  <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 12, background: "rgba(0,0,0,0.25)", border: `1px solid ${scoreBdr(sc)}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: scoreColor(sc), fontFamily: "monospace", lineHeight: 1 }}>{sc}</div>
+                    <div style={{ fontSize: 7, color: scoreColor(sc), opacity: 0.7, fontWeight: 700, letterSpacing: "0.05em" }}>SCORE</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 9, color: "#374151", fontFamily: "monospace" }}>#{i + 1}</span>
+                      {m.category && <span style={{ fontSize: 9, color: "#4b5563", background: "rgba(255,255,255,0.05)", borderRadius: 3, padding: "1px 5px" }}>{m.category}</span>}
+                      <span style={{ fontSize: 9, fontWeight: 700, color: compColor, borderRadius: 3, padding: "1px 6px", border: `1px solid ${compColor}30` }}>{competition} competition</span>
+                    </div>
+                    <p style={{ fontSize: 13.5, color: "#e5e7eb", lineHeight: 1.5, fontWeight: 500 }}>{m.question}</p>
+                  </div>
+                  <div style={{ flexShrink: 0, textAlign: "right" }}>
+                    <div style={{ fontSize: 9, color: "#374151", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: 2 }}>Est. reward/day</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "#34d399", fontFamily: "monospace" }}>${Math.round(m.dailyRewardEst).toLocaleString()}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(105px, 1fr))", gap: 8, padding: "10px 0", borderTop: `1px solid ${scoreBdr(sc)}`, borderBottom: `1px solid ${scoreBdr(sc)}`, marginBottom: 10 }}>
+                  {[
+                    { label: "Min. order", value: `$${m.rewardsMinSize}`, color: "#a5b4fc" },
+                    { label: "Max spread", value: `${m.rewardsMaxSpread}%`, color: "#a5b4fc" },
+                    { label: "Current spread", value: `${m.spread.toFixed(2)}%`, color: m.spread < m.rewardsMaxSpread ? "#34d399" : "#f87171" },
+                    { label: "Spread gap", value: `${spreadGap.toFixed(2)}%`, color: spreadGap > 1 ? "#34d399" : "#fcd34d" },
+                    { label: "Liquidity", value: fmtVol(m.liquidity), color: "#9ca3af" },
+                    { label: "Vol. 24h", value: fmtVol(m.volume24hr), color: "#9ca3af" },
+                    { label: "Time left", value: fmtDays(m.daysLeft), color: m.daysLeft < 3 ? "#f97316" : "#9ca3af" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label}>
+                      <div style={{ fontSize: 9, color: "#374151", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>{label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ fontSize: 11, color: "#374151" }}>
+                    Keep orders within <span style={{ color: "#a5b4fc", fontWeight: 600 }}>{m.rewardsMaxSpread}% spread</span> · min <span style={{ color: "#a5b4fc", fontWeight: 600 }}>${m.rewardsMinSize}</span> per side
+                  </div>
+                  <a href={m.url} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 12, color: "#34d399", textDecoration: "none", padding: "6px 16px", background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.25)", borderRadius: 8, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    Open in Polymarket →
+                  </a>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"polyedge" | "insider">("polyedge");
+  const [activeTab, setActiveTab] = useState<"polyedge" | "insider" | "rewards">("polyedge");
   const [filters, setFilters] = useState<Filters>({ minProb: 0.9, maxDays: 7, minVol: 1000, category: "" });
   const [markets, setMarkets] = useState<ProcessedMarket[]>([]);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
@@ -514,6 +727,7 @@ export default function Home() {
         {([
           { key: "polyedge" as const, label: "PolyEdge", icon: "◎" },
           { key: "insider" as const, label: "Insider Activity", icon: "⚡" },
+          { key: "rewards" as const, label: "Rewards", icon: "💎" },
         ]).map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)} className="tabbtn"
             style={{ padding: "8px 18px", fontSize: 13, fontWeight: 600, color: activeTab === tab.key ? "#fff" : "#4b5563", borderBottom: `2px solid ${activeTab === tab.key ? "#6366f1" : "transparent"}`, marginBottom: -1, display: "flex", alignItems: "center", gap: 6 }}>
@@ -521,6 +735,9 @@ export default function Home() {
             {tab.label}
             {tab.key === "insider" && (
               <span style={{ fontSize: 9, background: "rgba(248,113,113,0.15)", color: "#f87171", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 99, padding: "1px 6px", fontWeight: 700 }}>LIVE</span>
+            )}
+            {tab.key === "rewards" && (
+              <span style={{ fontSize: 9, background: "rgba(52,211,153,0.15)", color: "#34d399", border: "1px solid rgba(52,211,153,0.3)", borderRadius: 99, padding: "1px 6px", fontWeight: 700 }}>NEW</span>
             )}
           </button>
         ))}
@@ -651,6 +868,9 @@ export default function Home() {
 
       {/* ── TAB: INSIDER ACTIVITY ── */}
       {activeTab === "insider" && <InsiderTab allMarkets={markets} />}
+
+      {/* ── TAB: REWARDS ── */}
+      {activeTab === "rewards" && <RewardsTab />}
 
       <footer style={{ marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid rgba(255,255,255,0.04)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 10, color: "#1f2937" }}>PolyEdge · Gamma API · {markets.length} markets</span>
