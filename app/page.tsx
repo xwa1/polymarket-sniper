@@ -428,9 +428,6 @@ function RewardsTab() {
       </div>
 
       {error && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, color: "#fca5a5", fontSize: 12, marginBottom: "1rem" }}>{error}</div>}
-          ))}
-        </div>
-      )}
 
       {loading && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>Scanning markets for active rewards...</div>}
       {!loading && sorted.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>No markets found with active rewards.</div>}
