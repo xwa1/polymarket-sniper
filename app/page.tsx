@@ -314,9 +314,9 @@ function RewardsTab() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const tagIds = [6, 99, 400, 718, 10, 100265, 12, 21, 279];
+      const tagIds = [6, 99, 400, 718, 10, 100265, 12, 21, 279, 1312, 235, 101757, 128];
       const [recentPages, tagPages] = await Promise.all([
-        Promise.all(Array.from({ length: 12 }, (_, i) =>
+        Promise.all(Array.from({ length: 20 }, (_, i) =>
           fetch(`https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&offset=${i * 100}&order=id&ascending=false`, { headers: { Accept: "application/json" }, cache: "no-store" })
             .then(r => r.ok ? r.json() : []).catch(() => [])
         )),
@@ -336,13 +336,13 @@ function RewardsTab() {
           if (!m.acceptingOrders) continue;
           const clob = m.clobRewards ?? [];
           if (!clob.length) continue;
-          const dailyRate = parseFloat(clob[0]?.rewardsDailyRate ?? "0");
+          const dailyRate = Number(clob[0]?.rewardsDailyRate ?? 0);
           if (dailyRate <= 0) continue;
           const now = Date.now();
           const endTime = m.endDate ? new Date(m.endDate).getTime() : now + 999 * 86400000;
           const daysLeft = (endTime - now) / 86400000;
           if (daysLeft <= 0) continue;
-          const competitive = parseFloat(m.competitive ?? "0");
+          const competitive = Number(m.competitive ?? event.competitive ?? 0);
           const spread = parseFloat(m.spread ?? "1") * 100;
           const maxSpr = parseFloat(m.rewardsMaxSpread ?? "4.5");
           const minSize = parseFloat(m.rewardsMinSize ?? "50");
@@ -355,7 +355,7 @@ function RewardsTab() {
           const opportunityScore = Math.round(rewardScore + compScore + spreadScore + timeScore);
           const eventSlug = event.slug ?? m.slug ?? "";
           const url = eventSlug ? `https://polymarket.com/event/${eventSlug}` : "https://polymarket.com";
-          mapped.push({ id: String(m.id), question: m.question ?? "", url, category: event.category ?? event.tags?.[0]?.label ?? "", rewardsDailyRate: dailyRate, rewardsMinSize: minSize, rewardsMaxSpread: maxSpr, competitive, spread, liquidity: liq, volume24hr: vol24, daysLeft, bestBid: parseFloat(m.bestBid ?? "0"), bestAsk: parseFloat(m.bestAsk ?? "0"), opportunityScore });
+          mapped.push({ id: String(m.id), question: m.question ?? "", url, category: event.tags?.[0]?.label ?? event.category ?? m.category ?? "", rewardsDailyRate: dailyRate, rewardsMinSize: minSize, rewardsMaxSpread: maxSpr, competitive, spread, liquidity: liq, volume24hr: vol24, daysLeft, bestBid: parseFloat(m.bestBid ?? "0"), bestAsk: parseFloat(m.bestAsk ?? "0"), opportunityScore });
         }
       }
       const seenMkt = new Set<string>();
