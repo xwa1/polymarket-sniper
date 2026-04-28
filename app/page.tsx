@@ -314,52 +314,75 @@ function RewardsTab() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const tagIds = [6, 99, 400, 718, 10, 100265, 12, 21, 279, 1312, 235, 101757, 128];
-      const [recentPages, tagPages] = await Promise.all([
-        Promise.all(Array.from({ length: 20 }, (_, i) =>
-          fetch(`https://gamma-api.polymarket.com/events?active=true&closed=false&limit=100&offset=${i * 100}&order=id&ascending=false`, { headers: { Accept: "application/json" }, cache: "no-store" })
-            .then(r => r.ok ? r.json() : []).catch(() => [])
-        )),
-        Promise.all(tagIds.map(id =>
-          fetch(`https://gamma-api.polymarket.com/events?tag_id=${id}&active=true&closed=false&limit=100`, { headers: { Accept: "application/json" }, cache: "no-store" })
-            .then(r => r.ok ? r.json() : []).catch(() => [])
-        )),
-      ]);
+      // La API nueva devuelve rewardsMinSize y rewardsMaxSpread directamente en /markets
+      // clobRewards ya no viene en la respuesta — usamos rewardsMinSize>0 como filtro
+      const pages = await Promise.all(
+        Array.from({ length: 30 }, (_, i) =>
+          fetch(
+            `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset=${i * 100}&order=id&ascending=false`,
+            { headers: { Accept: "application/json" }, cache: "no-store" }
+          ).then(r => r.ok ? r.json() : []).catch(() => [])
+        )
+      );
 
-      const allEvents: any[] = [...recentPages.flat(), ...tagPages.flat()];
-      const seenEvt = new Set<string>();
-      const uniqueEvents = allEvents.filter(e => { const id = String(e.id); if (seenEvt.has(id)) return false; seenEvt.add(id); return true; });
-
+      const allMarkets: any[] = pages.flat();
+      const now = Date.now();
       const mapped: RewardMarket[] = [];
-      for (const event of uniqueEvents) {
-        for (const m of (event.markets ?? [])) {
-          if (!m.acceptingOrders) continue;
-          const clob = m.clobRewards ?? [];
-          if (!clob.length) continue;
-          const dailyRate = Number(clob[0]?.rewardsDailyRate ?? 0);
-          if (dailyRate <= 0) continue;
-          const now = Date.now();
-          const endTime = m.endDate ? new Date(m.endDate).getTime() : now + 999 * 86400000;
-          const daysLeft = (endTime - now) / 86400000;
-          if (daysLeft <= 0) continue;
-          const competitive = Number(m.competitive ?? event.competitive ?? 0);
-          const spread = parseFloat(m.spread ?? "1") * 100;
-          const maxSpr = parseFloat(m.rewardsMaxSpread ?? "4.5");
-          const minSize = parseFloat(m.rewardsMinSize ?? "50");
-          const liq = parseFloat(m.liquidityClob ?? m.liquidity ?? "0");
-          const vol24 = parseFloat(m.volume24hr ?? "0");
-          const rewardScore = Math.min(40, (dailyRate / 2000) * 40);
-          const compScore   = Math.min(35, (1 - competitive) * 105);
-          const spreadScore = spread < maxSpr ? Math.min(15, ((maxSpr - spread) / maxSpr) * 15) : 0;
-          const timeScore   = daysLeft > 1 && daysLeft <= 30 ? 10 : daysLeft > 30 ? 5 : 2;
-          const opportunityScore = Math.round(rewardScore + compScore + spreadScore + timeScore);
-          const eventSlug = event.slug ?? m.slug ?? "";
-          const url = eventSlug ? `https://polymarket.com/event/${eventSlug}` : "https://polymarket.com";
-          mapped.push({ id: String(m.id), question: m.question ?? "", url, category: event.tags?.[0]?.label ?? event.category ?? m.category ?? "", rewardsDailyRate: dailyRate, rewardsMinSize: minSize, rewardsMaxSpread: maxSpr, competitive, spread, liquidity: liq, volume24hr: vol24, daysLeft, bestBid: parseFloat(m.bestBid ?? "0"), bestAsk: parseFloat(m.bestAsk ?? "0"), opportunityScore });
-        }
+
+      for (const m of allMarkets) {
+        // Filtro principal: tiene rewards configuradas y acepta órdenes
+        const minSize = Number(m.rewardsMinSize ?? 0);
+        const maxSpr  = Number(m.rewardsMaxSpread ?? 0);
+        if (minSize <= 0 || maxSpr <= 0) continue;
+        if (!m.acceptingOrders) continue;
+
+        const endTime = m.endDate ? new Date(m.endDate).getTime() : now + 999 * 86400000;
+        const daysLeft = (endTime - now) / 86400000;
+        if (daysLeft <= 0) continue;
+
+        const competitive = Number(m.competitive ?? 0);
+        const spread      = Number(m.spread ?? 1) * 100; // en %
+        const liq         = Number(m.liquidityClob ?? m.liquidity ?? 0);
+        const vol24       = Number(m.volume24hr ?? 0);
+        const vol         = Number(m.volume ?? 0);
+
+        // Estimar recompensa diaria basada en liquidez y maxSpread
+        // Polymarket paga ~0.3% de la liquidez diaria en rewards
+        const dailyRateEst = liq * (maxSpr / 100) * 0.3;
+
+        // Opportunity score (0-100):
+        // liquidez alta + competencia baja + spread room + tiempo adecuado
+        const liqScore    = Math.min(35, (liq / 500000) * 35);
+        const compScore   = Math.min(30, (1 - competitive) * 90);
+        const spreadScore = spread < maxSpr ? Math.min(20, ((maxSpr - spread) / maxSpr) * 20) : 0;
+        const timeScore   = daysLeft > 1 && daysLeft <= 30 ? 10 : daysLeft > 30 ? 5 : 2;
+        const volScore    = vol24 > 10000 ? 5 : 0; // bonus si hay volumen real
+        const opportunityScore = Math.round(liqScore + compScore + spreadScore + timeScore + volScore);
+
+        const eventSlug = m.events?.[0]?.slug ?? m.slug ?? "";
+        const url = eventSlug ? `https://polymarket.com/event/${eventSlug}` : "https://polymarket.com";
+        const category = m.category ?? m.events?.[0]?.category ?? "";
+
+        mapped.push({
+          id: String(m.id),
+          question: m.question ?? "",
+          url, category,
+          rewardsDailyRate: dailyRateEst,
+          rewardsMinSize: minSize,
+          rewardsMaxSpread: maxSpr,
+          competitive,
+          spread,
+          liquidity: liq,
+          volume24hr: vol24,
+          daysLeft,
+          bestBid: Number(m.bestBid ?? 0),
+          bestAsk: Number(m.bestAsk ?? 0),
+          opportunityScore,
+        });
       }
-      const seenMkt = new Set<string>();
-      const unique = mapped.filter(m => { if (seenMkt.has(m.id)) return false; seenMkt.add(m.id); return true; });
+
+      const seen = new Set<string>();
+      const unique = mapped.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
       setRewards(unique.sort((a, b) => b.opportunityScore - a.opportunityScore));
       setFetchedAt(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
     } catch (e: unknown) { setError(e instanceof Error ? e.message : "Error loading rewards"); }
@@ -368,7 +391,7 @@ function RewardsTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = rewards.filter(m => m.rewardsDailyRate >= minReward);
+  const filtered = rewards.filter(m => m.liquidity >= minReward * 10 || m.rewardsDailyRate >= minReward);
   const sorted = [...filtered].sort((a, b) => {
     if (sortBy === "reward")      return b.rewardsDailyRate - a.rewardsDailyRate;
     if (sortBy === "competition") return a.competitive - b.competitive;
@@ -400,7 +423,7 @@ function RewardsTab() {
       <div style={{ background: "rgba(52,211,153,0.04)", border: "1px solid rgba(52,211,153,0.12)", borderRadius: 12, padding: "1rem", marginBottom: "1.25rem" }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: "#34d399", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>How CLOB rewards work</div>
         <p style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.65, marginBottom: 10 }}>
-          Polymarket pays market makers who keep resting orders within the allowed spread. The <strong style={{ color: "#d1d5db" }}>Daily Rate</strong> is real USDC paid per day — split among all qualifying LPs. Lower competition = larger share. Use <strong style={{ color: "#d1d5db" }}>Opportunity Score</strong> to find the best risk/reward.
+          Polymarket pays market makers who keep resting orders within <strong style={{ color: "#d1d5db" }}>Max Spread</strong> with orders above <strong style={{ color: "#d1d5db" }}>Min Size</strong>. Markets with high liquidity + low competition + spread room = highest opportunity. The daily reward estimate is based on liquidity depth and allowed spread.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
           {[
