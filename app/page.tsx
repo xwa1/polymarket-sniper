@@ -314,12 +314,10 @@ function RewardsTab() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      // Ordenar por volume_24hr trae clobRewards en la respuesta
-      // Usamos rewardsDailyRate real del campo clobRewards
       const pages = await Promise.all(
-        Array.from({ length: 20 }, (_, i) =>
+        Array.from({ length: 10 }, (_, i) =>
           fetch(
-            `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset=${i * 100}&order=volume_24hr&ascending=false`,
+            `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset=${i * 100}&rewardsMinSize=50`,
             { headers: { Accept: "application/json" }, cache: "no-store" }
           ).then(r => r.ok ? r.json() : []).catch(() => [])
         )
@@ -331,16 +329,12 @@ function RewardsTab() {
 
       for (const m of allMarkets) {
         if (!m.acceptingOrders) continue;
-
-        // Leer rewardsDailyRate real del campo clobRewards
         const clob = m.clobRewards ?? [];
         const dailyRate = clob.length > 0 ? Number(clob[0]?.rewardsDailyRate ?? 0) : 0;
         if (dailyRate <= 0) continue;
-
         const minSize = Number(m.rewardsMinSize ?? 0);
         const maxSpr  = Number(m.rewardsMaxSpread ?? 0);
         if (minSize <= 0 || maxSpr <= 0) continue;
-
         const endTime  = m.endDate ? new Date(m.endDate).getTime() : now + 999 * 86400000;
         const daysLeft = (endTime - now) / 86400000;
         if (daysLeft <= 0) continue;
@@ -349,14 +343,16 @@ function RewardsTab() {
         const spread      = Number(m.spread ?? 1) * 100;
         const liq         = Number(m.liquidityClob ?? m.liquidity ?? 0);
         const vol24       = Number(m.volume24hr ?? 0);
+        const priceChange = Math.abs(Number(m.oneDayPriceChange ?? 0));
 
-        // Score (0-100): reward alta + baja competencia + spread room + tiempo + liquidez
-        const rewardScore = Math.min(40, (dailyRate / 2000) * 40);
-        const compScore   = Math.min(30, (1 - competitive) * 90);
-        const spreadScore = spread < maxSpr ? Math.min(15, ((maxSpr - spread) / maxSpr) * 15) : 0;
-        const timeScore   = daysLeft > 1 && daysLeft <= 30 ? 10 : daysLeft > 30 ? 5 : 2;
-        const volBonus    = vol24 > 10000 ? 5 : 0;
-        const opportunityScore = Math.round(rewardScore + compScore + spreadScore + timeScore + volBonus);
+        // FARMING SCORE — de mejor a peor para farmear liquidez cómodamente:
+        // Spread bajo (25) + Baja competencia (25) + Rewards altas (20) + Cierre lejano (20) + Baja volatilidad (10)
+        const spreadScore = Math.round((1 - Math.min(1, spread / maxSpr)) * 25);
+        const compScore   = Math.round((1 - competitive) * 25);
+        const rewardScore = Math.min(20, (dailyRate / 1000) * 20);
+        const timeScore   = daysLeft >= 30 ? 20 : daysLeft >= 7 ? 12 : daysLeft >= 1 ? 5 : 0;
+        const volScore    = Math.round((1 - Math.min(1, priceChange / 0.2)) * 10);
+        const opportunityScore = Math.round(spreadScore + compScore + rewardScore + timeScore + volScore);
 
         const eventSlug = m.events?.[0]?.slug ?? m.slug ?? "";
         const url = eventSlug ? `https://polymarket.com/event/${eventSlug}` : "https://polymarket.com";
@@ -382,6 +378,7 @@ function RewardsTab() {
 
       const seen = new Set<string>();
       const unique = mapped.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+      // Ordenado de mejor a peor farming score directamente
       setRewards(unique.sort((a, b) => b.opportunityScore - a.opportunityScore));
       setFetchedAt(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
     } catch (e: unknown) { setError(e instanceof Error ? e.message : "Error loading rewards"); }
@@ -391,12 +388,7 @@ function RewardsTab() {
   useEffect(() => { load(); }, [load]);
 
   const filtered = rewards.filter(m => m.rewardsDailyRate >= minReward);
-  const sorted = [...filtered].sort((a, b) => {
-    if (sortBy === "reward")      return b.rewardsDailyRate - a.rewardsDailyRate;
-    if (sortBy === "competition") return a.competitive - b.competitive;
-    if (sortBy === "days")        return a.daysLeft - b.daysLeft;
-    return b.opportunityScore - a.opportunityScore;
-  });
+  const sorted = [...filtered].sort((a, b) => b.opportunityScore - a.opportunityScore);
 
   const compLabel = (c: number) => c < 0.85 ? "Low" : c < 0.95 ? "Medium" : "High";
   const compColor = (c: number) => c < 0.85 ? "#34d399" : c < 0.95 ? "#fcd34d" : "#f87171";
@@ -448,15 +440,7 @@ function RewardsTab() {
             ${v}+
           </button>
         ))}
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 9, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Sort:</span>
-          {([{ k: "score" as const, l: "Opportunity" }, { k: "reward" as const, l: "Reward ↓" }, { k: "competition" as const, l: "Less competed" }, { k: "days" as const, l: "Closes soon" }]).map(({ k, l }) => (
-            <button key={k} onClick={() => setSortBy(k)} className="sbtn"
-              style={{ fontSize: 11, padding: "3px 10px", border: `1px solid ${sortBy === k ? "rgba(52,211,153,0.5)" : "rgba(255,255,255,0.07)"}`, borderRadius: 99, background: sortBy === k ? "rgba(52,211,153,0.12)" : "transparent", color: sortBy === k ? "#34d399" : "#6b7280", fontWeight: sortBy === k ? 600 : 400 }}>
-              {l}
-            </button>
-          ))}
-        </div>
+
       </div>
 
       {!loading && sorted.length > 0 && (
@@ -510,16 +494,15 @@ function RewardsTab() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(100px,1fr))", gap: 8, padding: "10px 0", borderTop: `1px solid ${scoreBdr(sc)}`, borderBottom: `1px solid ${scoreBdr(sc)}`, marginBottom: 10 }}>
                   {[
-                    { label: "Min. order", value: `$${m.rewardsMinSize}`, color: "#a5b4fc" },
-                    { label: "Max spread", value: `${m.rewardsMaxSpread}%`, color: "#a5b4fc" },
-                    { label: "Current spread", value: `${m.spread.toFixed(3)}%`, color: canEarn ? "#34d399" : "#f87171" },
-                    { label: "Spread room", value: `${spreadRoom.toFixed(3)}%`, color: spreadRoom > 0.5 ? "#34d399" : "#fcd34d" },
-                    { label: "Competition", value: (m.competitive * 100).toFixed(1) + "%", color: cc },
-                    { label: "Liquidity", value: fmtVol(m.liquidity), color: "#9ca3af" },
-                    { label: "Vol. 24h", value: fmtVol(m.volume24hr), color: "#9ca3af" },
-                    { label: "Time left", value: fmtDays(m.daysLeft), color: m.daysLeft < 3 ? "#f97316" : "#9ca3af" },
-                  ].map(({ label, value, color }) => (
-                    <div key={label}>
+                    { label: "Spread actual", value: `${m.spread.toFixed(2)}%`, color: canEarn ? "#34d399" : "#f87171", info: "Spread actual vs máximo permitido" },
+                    { label: "Max spread", value: `${m.rewardsMaxSpread}%`, color: "#a5b4fc", info: "Spread máximo para ganar rewards" },
+                    { label: "Competencia", value: (m.competitive * 100).toFixed(1) + "%", color: cc, info: "% de competencia — más bajo = más fácil" },
+                    { label: "Rewards/día", value: `$${m.rewardsDailyRate.toLocaleString()}`, color: "#34d399", info: "USDC pagados por día a LPs" },
+                    { label: "Cierre", value: fmtDays(m.daysLeft), color: m.daysLeft >= 30 ? "#34d399" : m.daysLeft >= 7 ? "#fcd34d" : "#f97316", info: "Tiempo hasta resolución" },
+                    { label: "Liquidez", value: fmtVol(m.liquidity), color: "#9ca3af", info: "Liquidez total del mercado" },
+                    { label: "Min. orden", value: `$${m.rewardsMinSize}`, color: "#9ca3af", info: "Orden mínima para optar a rewards" },
+                  ].map(({ label, value, color, info }) => (
+                    <div key={label} title={info}>
                       <div style={{ fontSize: 9, color: "#374151", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>{label}</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
                     </div>
