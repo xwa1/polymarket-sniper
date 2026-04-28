@@ -307,8 +307,6 @@ function RewardsTab() {
   const [rewards, setRewards] = useState<RewardMarket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<"score" | "reward" | "competition" | "days">("score");
-  const [minReward, setMinReward] = useState(50);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -387,8 +385,7 @@ function RewardsTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = rewards.filter(m => m.rewardsDailyRate >= minReward);
-  const sorted = [...filtered].sort((a, b) => b.opportunityScore - a.opportunityScore);
+  const sorted = rewards; // ya ordenado de mejor a peor al cargar
 
   const compLabel = (c: number) => c < 0.85 ? "Low" : c < 0.95 ? "Medium" : "High";
   const compColor = (c: number) => c < 0.85 ? "#34d399" : c < 0.95 ? "#fcd34d" : "#f87171";
@@ -431,36 +428,12 @@ function RewardsTab() {
       </div>
 
       {error && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, color: "#fca5a5", fontSize: 12, marginBottom: "1rem" }}>{error}</div>}
-
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "1rem", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 9, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Min reward/day:</span>
-        {[50, 100, 300, 500, 1000].map(v => (
-          <button key={v} onClick={() => setMinReward(v)} className="sbtn"
-            style={{ fontSize: 11, padding: "3px 10px", border: `1px solid ${minReward === v ? "rgba(52,211,153,0.5)" : "rgba(255,255,255,0.07)"}`, borderRadius: 99, background: minReward === v ? "rgba(52,211,153,0.12)" : "transparent", color: minReward === v ? "#34d399" : "#6b7280", fontWeight: minReward === v ? 600 : 400 }}>
-            ${v}+
-          </button>
-        ))}
-
-      </div>
-
-      {!loading && sorted.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: "1.25rem" }}>
-          {[
-            { label: "Markets found", value: String(sorted.length), color: "#fff" },
-            { label: "Total pool/day", value: "$" + sorted.reduce((s, m) => s + m.rewardsDailyRate, 0).toLocaleString(undefined, { maximumFractionDigits: 0 }), color: "#34d399" },
-            { label: "Top reward/day", value: "$" + Math.max(...sorted.map(m => m.rewardsDailyRate)).toLocaleString(), color: "#fcd34d" },
-            { label: "Avg. competition", value: (sorted.reduce((s, m) => s + m.competitive, 0) / sorted.length * 100).toFixed(1) + "%", color: "#fb923c" },
-          ].map(({ label, value, color }) => (
-            <div key={label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color, fontFamily: "'JetBrains Mono',monospace" }}>{value}</div>
-              <div style={{ fontSize: 9, color: "#374151", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700 }}>{label}</div>
-            </div>
           ))}
         </div>
       )}
 
       {loading && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>Scanning markets for active rewards...</div>}
-      {!loading && sorted.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>No markets found with rewards ≥ ${minReward}/day.</div>}
+      {!loading && sorted.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0", color: "#374151", fontSize: 13 }}>No markets found with active rewards.</div>}
 
       {!loading && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
