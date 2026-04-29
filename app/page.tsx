@@ -220,7 +220,7 @@ function InsiderTab({ allMarkets }: { allMarkets: ProcessedMarket[] }) {
         oneWeekPriceChange: m.oneWeekPriceChange ?? 0,
         oneMonthPriceChange: m.oneMonthPriceChange ?? 0,
         category: m.events?.[0]?.tags?.[0]?.label ?? "",
-        url: m.events?.[0]?.slug ? \`https://polymarket.com/event/\${m.events[0].slug}\` : \`https://polymarket.com/event/\${m.slug ?? ""}\`,
+        url: m.events?.[0]?.slug ? `https://polymarket.com/event/${m.events[0].slug}` : `https://polymarket.com/event/${m.slug ?? ""}`,
         daysLeft: m.endDate ? (new Date(m.endDate).getTime() - Date.now()) / 86400000 : 999,
         bestBid: m.bestBid ?? 0,
         bestAsk: m.bestAsk ?? 0,
