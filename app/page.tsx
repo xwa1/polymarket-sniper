@@ -36,14 +36,7 @@ const DAYS_LABELS = ["≤ 12h","≤ 1 day","≤ 2 days","≤ 3 days","≤ 7 days
 const VOL_VALS = [0, 1000, 10000, 50000, 100000];
 const VOL_LABELS = ["Any","$1K+","$10K+","$50K+","$100K+"];
 
-interface InsiderSignal {
-  market: ProcessedMarket;
-  spikeRatio: number;
-  hourlyAvg: number;
-  lastHourVol: number;
-  alertLevel: "MODERATE" | "HIGH" | "EXTREME";
-  detectedAt: string;
-}
+
 
 interface RewardMarket {
   id: string; question: string; url: string; category: string;
@@ -180,35 +173,98 @@ function UrgentTerminal({ markets }: { markets: ProcessedMarket[] }) {
 }
 
 // ── Insider Activity Tab ──────────────────────────────────────────────────────
+interface HistoricalSpike {
+  market: any;
+  spikeRatio24h: number;
+  spikeRatio1w: number;
+  priceChange24h: number;
+  priceChange1w: number;
+  priceChange1m: number;
+  vol24h: number;
+  vol1w: number;
+  vol1m: number;
+  dailyAvg: number;
+  alertLevel: "MODERATE" | "HIGH" | "EXTREME";
+  periods: { label: string; ratio: number; priceChg: number; color: string }[];
+}
+
 function InsiderTab({ allMarkets }: { allMarkets: ProcessedMarket[] }) {
-  const [signals, setSignals] = useState<InsiderSignal[]>([]);
+  const [signals, setSignals] = useState<HistoricalSpike[]>([]);
   const [scanning, setScanning] = useState(false);
   const [lastScan, setLastScan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<"live" | "history">("live");
 
   const scan = useCallback(async () => {
     setScanning(true); setError(null);
     try {
-      const qs = new URLSearchParams({ minProb: "0.05", maxDays: "30", minVol: "50000", category: "Politics" });
-      const res = await fetch(`/api/markets?${qs}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "API Error");
-      const politicalMarkets: ProcessedMarket[] = (data.markets ?? []).filter((m: ProcessedMarket) => m.volume24hr > 0).slice(0, 40);
-      const detected: InsiderSignal[] = [];
-      for (const market of politicalMarkets) {
-        const daysActive = Math.max(1, 30 - market.daysLeft);
-        const estimatedDailyAvg = market.volume / daysActive;
-        const estimatedHourlyAvg = estimatedDailyAvg / 24;
-        if (estimatedHourlyAvg <= 0) continue;
-        const spikeRatio = market.volume24hr / estimatedDailyAvg;
-        if (spikeRatio < 2.5) continue;
+      // Escanear todos los mercados activos con volumen significativo
+      const categories = ["Politics", "Crypto", "Sports", "World", ""];
+      const fetches = categories.map(cat => {
+        const qs = new URLSearchParams({ minProb: "0.02", maxDays: "365", minVol: "10000", category: cat });
+        return fetch(`/api/markets?${qs}`).then(r => r.json()).catch(() => ({ markets: [] }));
+      });
+      const results = await Promise.all(fetches);
+      const allMkts: any[] = results.flatMap(r => r.markets ?? []);
+
+      // Deduplicar
+      const seen = new Set<string>();
+      const unique = allMkts.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+
+      const detected: HistoricalSpike[] = [];
+
+      for (const market of unique) {
+        const vol24  = market.volume24hr ?? 0;
+        const vol1w  = market.volume1wk ?? (vol24 * 7);
+        const vol1m  = market.volume1mo ?? (vol24 * 30);
+        if (vol24 <= 0 || vol1m <= 0) continue;
+
+        // Media diaria del mes (excluyendo las últimas 24h para no sesgar)
+        const dailyAvg = Math.max(1, (vol1m - vol24) / 29);
+
+        // Ratio de spike: cuántas veces el volumen de hoy supera la media diaria
+        const spike24h = vol24 / dailyAvg;
+        // Ratio semanal: vol esta semana vs media semanal del mes
+        const weeklyAvg = dailyAvg * 7;
+        const spike1w = vol1w / Math.max(1, weeklyAvg);
+
+        // Solo incluir si hay spike real en 24h O en semana
+        if (spike24h < 2 && spike1w < 1.8) continue;
+
+        const priceChg24h = market.oneDayPriceChange ?? 0;
+        const priceChg1w  = market.oneWeekPriceChange ?? 0;
+        const priceChg1m  = market.oneMonthPriceChange ?? 0;
+
+        // Nivel de alerta basado en el spike más alto
+        const maxSpike = Math.max(spike24h, spike1w);
         let alertLevel: "MODERATE" | "HIGH" | "EXTREME" = "MODERATE";
-        if (spikeRatio >= 10) alertLevel = "EXTREME";
-        else if (spikeRatio >= 5) alertLevel = "HIGH";
-        detected.push({ market, spikeRatio, hourlyAvg: estimatedHourlyAvg, lastHourVol: market.volume24hr / 8, alertLevel, detectedAt: new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) });
+        if (maxSpike >= 8) alertLevel = "EXTREME";
+        else if (maxSpike >= 4) alertLevel = "HIGH";
+
+        // Períodos con datos históricos
+        const periods = [
+          { label: "24h spike", ratio: spike24h, priceChg: priceChg24h * 100, color: spike24h >= 4 ? "#f87171" : spike24h >= 2 ? "#fb923c" : "#fcd34d" },
+          { label: "7d spike",  ratio: spike1w,  priceChg: priceChg1w  * 100, color: spike1w  >= 4 ? "#f87171" : spike1w  >= 2 ? "#fb923c" : "#fcd34d" },
+          { label: "30d move",  ratio: vol1m / Math.max(1, dailyAvg * 30), priceChg: priceChg1m * 100, color: "#a5b4fc" },
+        ];
+
+        detected.push({
+          market,
+          spikeRatio24h: spike24h,
+          spikeRatio1w:  spike1w,
+          priceChange24h: priceChg24h,
+          priceChange1w:  priceChg1w,
+          priceChange1m:  priceChg1m,
+          vol24h: vol24, vol1w, vol1m,
+          dailyAvg,
+          alertLevel,
+          periods,
+        });
       }
-      detected.sort((a, b) => b.spikeRatio - a.spikeRatio);
-      setSignals(detected.slice(0, 15));
+
+      // Ordenar por spike 24h descendente
+      detected.sort((a, b) => b.spikeRatio24h - a.spikeRatio24h);
+      setSignals(detected.slice(0, 30));
       setLastScan(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     } catch (e: unknown) { setError(e instanceof Error ? e.message : "Scan error"); }
     finally { setScanning(false); }
@@ -217,81 +273,139 @@ function InsiderTab({ allMarkets }: { allMarkets: ProcessedMarket[] }) {
   useEffect(() => { scan(); const i = setInterval(scan, 5 * 60 * 1000); return () => clearInterval(i); }, [scan]);
 
   const alertColors: Record<string, { bg: string; border: string; text: string }> = {
-    MODERATE: { bg: "rgba(253,224,71,0.06)", border: "rgba(253,224,71,0.2)", text: "#fcd34d" },
-    HIGH:     { bg: "rgba(251,146,60,0.07)", border: "rgba(251,146,60,0.22)", text: "#fb923c" },
-    EXTREME:  { bg: "rgba(248,113,113,0.08)", border: "rgba(248,113,113,0.28)", text: "#f87171" },
+    MODERATE: { bg: "rgba(253,224,71,0.05)", border: "rgba(253,224,71,0.18)", text: "#fcd34d" },
+    HIGH:     { bg: "rgba(251,146,60,0.06)", border: "rgba(251,146,60,0.2)",  text: "#fb923c" },
+    EXTREME:  { bg: "rgba(248,113,113,0.07)", border: "rgba(248,113,113,0.25)", text: "#f87171" },
   };
-  const alertLabels: Record<string, string> = { MODERATE: "MODERATE", HIGH: "HIGH", EXTREME: "EXTREME" };
+
+  // Filtrar: live = spike fuerte hoy; history = spikes pasados (semana/mes)
+  const liveSignals    = signals.filter(s => s.spikeRatio24h >= 2);
+  const historySignals = signals.filter(s => s.spikeRatio1w >= 1.8 || s.priceChange1m !== 0);
+
+  const displayed = view === "live" ? liveSignals : historySignals;
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "1.5rem", flexWrap: "wrap", gap: 12 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "1.25rem", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: scanning ? "#f97316" : signals.length > 0 ? "#f87171" : "#34d399", animation: scanning ? "blink 1s infinite" : "none" }} />
-            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: "-0.02em" }}>Insider Activity Detector</h2>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: scanning ? "#f97316" : liveSignals.length > 0 ? "#f87171" : "#34d399", animation: "blink 2s infinite" }} />
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: "-0.02em" }}>Insider Activity</h2>
           </div>
-          <p style={{ fontSize: 12, color: "#4b5563" }}>Political markets with abnormal hourly volume spikes{lastScan && <span style={{ color: "#374151" }}> · Last scan: {lastScan}</span>}</p>
+          <p style={{ fontSize: 12, color: "#4b5563" }}>
+            Volumen anormal detectado · {lastScan && <span style={{ color: "#374151" }}>Último scan: {lastScan}</span>}
+          </p>
         </div>
         <button onClick={scan} disabled={scanning} style={{ fontSize: 12, padding: "7px 16px", background: scanning ? "rgba(99,102,241,0.2)" : "linear-gradient(135deg,#4f46e5,#7c3aed)", border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, color: "#fff", fontWeight: 600, cursor: scanning ? "default" : "pointer", opacity: scanning ? 0.6 : 1 }}>
           {scanning ? "⟳ Scanning..." : "Scan now"}
         </button>
       </div>
-      <div style={{ background: "rgba(99,102,241,0.05)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, padding: "1rem", marginBottom: "1.5rem" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>How it works</div>
-        <p style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6 }}>We scan active political markets every 5 minutes. For each market we estimate the daily average volume and compare it against the last 24h volume. A spike of 3x or more — with no apparent news — may indicate insider positioning before a major announcement.</p>
-        <div style={{ display: "flex", gap: 16, marginTop: 10, flexWrap: "wrap" }}>
-          {[{ label: "MODERATE", threshold: "2.5x – 5x", color: "#fcd34d" }, { label: "HIGH", threshold: "5x – 10x", color: "#fb923c" }, { label: "EXTREME", threshold: "> 10x", color: "#f87171" }].map(({ label, threshold, color }) => (
-            <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
-              <span style={{ fontSize: 11, color: "#6b7280" }}><span style={{ color, fontWeight: 600 }}>{label}</span> {threshold}</span>
-            </div>
-          ))}
-        </div>
+
+      {/* Tabs live / histórico */}
+      <div style={{ display: "flex", gap: 8, marginBottom: "1.25rem" }}>
+        {([
+          { k: "live" as const,    l: "⚡ En vivo",  count: liveSignals.length },
+          { k: "history" as const, l: "📊 Histórico", count: historySignals.length },
+        ]).map(({ k, l, count }) => (
+          <button key={k} onClick={() => setView(k)} className="sbtn"
+            style={{ fontSize: 12, padding: "6px 16px", border: `1px solid ${view === k ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"}`, borderRadius: 8, background: view === k ? "rgba(99,102,241,0.15)" : "transparent", color: view === k ? "#a5b4fc" : "#6b7280", fontWeight: view === k ? 600 : 400, display: "flex", alignItems: "center", gap: 6 }}>
+            {l}
+            <span style={{ fontSize: 10, background: "rgba(255,255,255,0.08)", borderRadius: 99, padding: "1px 6px" }}>{count}</span>
+          </button>
+        ))}
       </div>
+
+      {/* Explicación */}
+      <div style={{ background: "rgba(99,102,241,0.04)", border: "1px solid rgba(99,102,241,0.12)", borderRadius: 10, padding: "10px 14px", marginBottom: "1.25rem", fontSize: 11, color: "#6b7280", lineHeight: 1.6 }}>
+        {view === "live"
+          ? "⚡ Mercados donde el volumen de las últimas 24h supera 2x la media diaria del mes. Puede indicar entrada de capital antes de un evento."
+          : "📊 Histórico de mercados con spikes de volumen en la última semana o mes, con movimiento de precio asociado."}
+      </div>
+
       {error && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 8, color: "#fca5a5", fontSize: 12, marginBottom: "1rem" }}>{error}</div>}
-      {scanning && <div style={{ textAlign: "center", padding: "3rem 0", color: "#4b5563", fontSize: 13 }}>Scanning political markets for anomalies...</div>}
-      {!scanning && signals.length === 0 && <div style={{ textAlign: "center", padding: "3rem 0" }}><div style={{ fontSize: 32, marginBottom: 12 }}>🟢</div><div style={{ fontSize: 14, color: "#4b5563" }}>No insider signals detected right now.</div></div>}
-      {!scanning && signals.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {signals.map((s, i) => {
+      {scanning && <div style={{ textAlign: "center", padding: "3rem 0", color: "#4b5563", fontSize: 13 }}>Escaneando mercados...</div>}
+      {!scanning && displayed.length === 0 && (
+        <div style={{ textAlign: "center", padding: "3rem 0" }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>🟢</div>
+          <div style={{ fontSize: 14, color: "#4b5563" }}>Sin señales detectadas en este período.</div>
+        </div>
+      )}
+
+      {!scanning && displayed.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {displayed.map((s, i) => {
             const ac = alertColors[s.alertLevel];
-            const pct = Math.round(s.market.bestProb * 100);
-            const priceColor = s.market.oneDayPriceChange > 0.05 ? "#34d399" : s.market.oneDayPriceChange < -0.05 ? "#f87171" : "#9ca3af";
+            const pct = Math.round((s.market.bestProb ?? 0.5) * 100);
             return (
-              <div key={s.market.id} style={{ background: ac.bg, border: `1px solid ${ac.border}`, borderRadius: 14, padding: "1rem 1.25rem" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                  <span style={{ fontSize: 9, fontWeight: 800, color: ac.text, border: `1px solid ${ac.border}`, borderRadius: 4, padding: "2px 8px", letterSpacing: "0.1em" }}>⚡ {alertLabels[s.alertLevel]}</span>
-                  <span style={{ fontSize: 11, color: ac.text, fontFamily: "monospace", fontWeight: 700 }}>{s.spikeRatio.toFixed(1)}x spike</span>
-                  <span style={{ fontSize: 10, color: "#374151", marginLeft: "auto" }}>#{i + 1} · {s.detectedAt}</span>
-                </div>
-                <p style={{ fontSize: 13.5, color: "#e5e7eb", lineHeight: 1.5, marginBottom: 12, fontWeight: 500 }}>{s.market.question}</p>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 10, marginBottom: 12 }}>
-                  <div><div style={{ fontSize: 9, color: "#374151", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Volume spike</div><SpikeChart spikeRatio={s.spikeRatio} /></div>
-                  {[
-                    { label: "Hourly avg.", value: fmtVol(s.hourlyAvg), color: "#9ca3af" },
-                    { label: "Last 8h est.", value: fmtVol(s.lastHourVol), color: ac.text },
-                    { label: "24h volume", value: fmtVol(s.market.volume24hr), color: "#a5b4fc" },
-                    { label: "Price move", value: (s.market.oneDayPriceChange * 100 > 0 ? "+" : "") + (s.market.oneDayPriceChange * 100).toFixed(1) + "%", color: priceColor },
-                    { label: "Time left", value: fmtDays(s.market.daysLeft), color: "#fb923c" },
-                    { label: "Liquidity", value: fmtVol(s.market.volume), color: "#9ca3af" },
-                  ].map(({ label, value, color }) => (
-                    <div key={label}><div style={{ fontSize: 9, color: "#374151", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 3 }}>{label}</div><div style={{ fontSize: 14, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div></div>
-                  ))}
-                  <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
-                    <div style={{ textAlign: "center", padding: "4px 8px", background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 7 }}>
+              <div key={s.market.id} style={{ background: ac.bg, border: `1px solid ${ac.border}`, borderRadius: 12, padding: "1rem 1.25rem" }}>
+                {/* Top */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 9, fontWeight: 800, color: ac.text, border: `1px solid ${ac.border}`, borderRadius: 4, padding: "2px 8px", letterSpacing: "0.08em" }}>
+                        ⚡ {s.alertLevel}
+                      </span>
+                      <span style={{ fontSize: 11, color: ac.text, fontFamily: "monospace", fontWeight: 700 }}>
+                        {s.spikeRatio24h.toFixed(1)}x spike 24h
+                      </span>
+                      {s.market.category && <span style={{ fontSize: 9, color: "#4b5563", background: "rgba(255,255,255,0.05)", borderRadius: 3, padding: "1px 5px" }}>{s.market.category}</span>}
+                      <span style={{ fontSize: 9, color: "#374151", marginLeft: "auto" }}>#{i + 1}</span>
+                    </div>
+                    <p style={{ fontSize: 13, color: "#e5e7eb", lineHeight: 1.5, fontWeight: 500 }}>{s.market.question}</p>
+                  </div>
+                  {/* YES/NO */}
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <div style={{ textAlign: "center", padding: "4px 10px", background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 7 }}>
                       <div style={{ fontSize: 8, color: "#34d399", fontWeight: 700 }}>YES</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#34d399", fontFamily: "monospace" }}>{pct}¢</div>
                     </div>
-                    <div style={{ textAlign: "center", padding: "4px 8px", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 7 }}>
+                    <div style={{ textAlign: "center", padding: "4px 10px", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 7 }}>
                       <div style={{ fontSize: 8, color: "#f87171", fontWeight: 700 }}>NO</div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#f87171", fontFamily: "monospace" }}>{100 - pct}¢</div>
                     </div>
                   </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8, borderTop: `1px solid ${ac.border}` }}>
-                  <div style={{ fontSize: 10, color: "#374151", fontFamily: "monospace" }}>{s.market.bestBid > 0 && `bid ${fmtPct(s.market.bestBid)} · ask ${fmtPct(s.market.bestAsk)} · spr ${(s.market.spread * 100).toFixed(1)}%`}</div>
-                  <a href={s.market.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: ac.text, textDecoration: "none", padding: "5px 14px", border: `1px solid ${ac.border}`, borderRadius: 8, fontWeight: 600 }}>View →</a>
+
+                {/* Períodos históricos */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, padding: "10px 0", borderTop: `1px solid ${ac.border}`, borderBottom: `1px solid ${ac.border}`, marginBottom: 10 }}>
+                  {s.periods.map(p => (
+                    <div key={p.label} style={{ background: "rgba(0,0,0,0.15)", borderRadius: 8, padding: "8px 10px" }}>
+                      <div style={{ fontSize: 9, color: "#374151", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>{p.label}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: p.color, fontFamily: "monospace" }}>{p.ratio.toFixed(1)}x</div>
+                      <div style={{ fontSize: 10, color: p.priceChg > 0 ? "#34d399" : p.priceChg < 0 ? "#f87171" : "#4b5563", fontFamily: "monospace", marginTop: 2 }}>
+                        {p.priceChg > 0 ? "+" : ""}{p.priceChg.toFixed(1)}% precio
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Stats */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(90px,1fr))", gap: 8, marginBottom: 10 }}>
+                  {[
+                    { label: "Vol. 24h",   value: fmtVol(s.vol24h),   color: ac.text },
+                    { label: "Vol. 7d",    value: fmtVol(s.vol1w),    color: "#9ca3af" },
+                    { label: "Vol. 30d",   value: fmtVol(s.vol1m),    color: "#9ca3af" },
+                    { label: "Media/día",  value: fmtVol(s.dailyAvg), color: "#374151" },
+                    { label: "Liquidez",   value: fmtVol(s.market.volume), color: "#9ca3af" },
+                    { label: "Cierre",     value: fmtDays(s.market.daysLeft), color: "#fb923c" },
+                  ].map(({ label, value, color }) => (
+                    <div key={label}>
+                      <div style={{ fontSize: 9, color: "#374151", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Footer */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ fontSize: 10, color: "#374151", fontFamily: "monospace" }}>
+                    {s.market.bestBid > 0 && `bid ${fmtPct(s.market.bestBid)} · ask ${fmtPct(s.market.bestAsk)} · spr ${(s.market.spread * 100).toFixed(1)}%`}
+                  </div>
+                  <a href={s.market.url} target="_blank" rel="noopener noreferrer"
+                    style={{ fontSize: 12, color: ac.text, textDecoration: "none", padding: "5px 14px", border: `1px solid ${ac.border}`, borderRadius: 8, fontWeight: 600 }}>
+                    Ver mercado →
+                  </a>
                 </div>
               </div>
             );
@@ -312,72 +426,15 @@ function RewardsTab() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const pages = await Promise.all(
-        Array.from({ length: 10 }, (_, i) =>
-          fetch(
-            `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset=${i * 100}&rewardsMinSize=50`,
-            { headers: { Accept: "application/json" }, cache: "no-store" }
-          ).then(r => r.ok ? r.json() : []).catch(() => [])
-        )
-      );
-
-      const allMarkets: any[] = pages.flat();
-      const now = Date.now();
-      const mapped: RewardMarket[] = [];
-
-      for (const m of allMarkets) {
-        if (!m.acceptingOrders) continue;
-        const clob = m.clobRewards ?? [];
-        const dailyRate = clob.length > 0 ? Number(clob[0]?.rewardsDailyRate ?? 0) : 0;
-        if (dailyRate <= 0) continue;
-        const minSize = Number(m.rewardsMinSize ?? 0);
-        const maxSpr  = Number(m.rewardsMaxSpread ?? 0);
-        if (minSize <= 0 || maxSpr <= 0) continue;
-        const endTime  = m.endDate ? new Date(m.endDate).getTime() : now + 999 * 86400000;
-        const daysLeft = (endTime - now) / 86400000;
-        if (daysLeft <= 0) continue;
-
-        const competitive = Number(m.competitive ?? 0);
-        const spread      = Number(m.spread ?? 1) * 100;
-        const liq         = Number(m.liquidityClob ?? m.liquidity ?? 0);
-        const vol24       = Number(m.volume24hr ?? 0);
-        const priceChange = Math.abs(Number(m.oneDayPriceChange ?? 0));
-
-        // FARMING SCORE — de mejor a peor para farmear liquidez cómodamente:
-        // Spread bajo (25) + Baja competencia (25) + Rewards altas (20) + Cierre lejano (20) + Baja volatilidad (10)
-        const spreadScore = Math.round((1 - Math.min(1, spread / maxSpr)) * 25);
-        const compScore   = Math.round((1 - competitive) * 25);
-        const rewardScore = Math.min(20, (dailyRate / 1000) * 20);
-        const timeScore   = daysLeft >= 30 ? 20 : daysLeft >= 7 ? 12 : daysLeft >= 1 ? 5 : 0;
-        const volScore    = Math.round((1 - Math.min(1, priceChange / 0.2)) * 10);
-        const opportunityScore = Math.round(spreadScore + compScore + rewardScore + timeScore + volScore);
-
-        const eventSlug = m.events?.[0]?.slug ?? m.slug ?? "";
-        const url = eventSlug ? `https://polymarket.com/event/${eventSlug}` : "https://polymarket.com";
-
-        mapped.push({
-          id: String(m.id),
-          question: m.question ?? "",
-          url,
-          category: m.category ?? m.events?.[0]?.category ?? "",
-          rewardsDailyRate: dailyRate,
-          rewardsMinSize: minSize,
-          rewardsMaxSpread: maxSpr,
-          competitive,
-          spread,
-          liquidity: liq,
-          volume24hr: vol24,
-          daysLeft,
-          bestBid: Number(m.bestBid ?? 0),
-          bestAsk: Number(m.bestAsk ?? 0),
-          opportunityScore,
-        });
-      }
-
-      const seen = new Set<string>();
-      const unique = mapped.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
-      // Ordenado de mejor a peor farming score directamente
-      setRewards(unique.sort((a, b) => b.opportunityScore - a.opportunityScore));
+      // Llamada a nuestro proxy backend — resuelve CORS con Polymarket
+      const res = await fetch("/api/rewards", { cache: "no-store" });
+      if (!res.ok) throw new Error("API error " + res.status);
+      const data = await res.json();
+      const markets: RewardMarket[] = (data.markets ?? []).map((m: any) => ({
+        ...m,
+        opportunityScore: m.farmingScore ?? 0,
+      }));
+      setRewards(markets);
       setFetchedAt(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
     } catch (e: unknown) { setError(e instanceof Error ? e.message : "Error loading rewards"); }
     finally { setLoading(false); }
