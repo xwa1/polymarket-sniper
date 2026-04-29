@@ -198,14 +198,34 @@ function InsiderTab({ allMarkets }: { allMarkets: ProcessedMarket[] }) {
   const scan = useCallback(async () => {
     setScanning(true); setError(null);
     try {
-      // Escanear todos los mercados activos con volumen significativo
-      const categories = ["Politics", "Crypto", "Sports", "World", ""];
-      const fetches = categories.map(cat => {
-        const qs = new URLSearchParams({ minProb: "0.02", maxDays: "365", minVol: "10000", category: cat });
-        return fetch(`/api/markets?${qs}`).then(r => r.json()).catch(() => ({ markets: [] }));
-      });
-      const results = await Promise.all(fetches);
-      const allMkts: any[] = results.flatMap(r => r.markets ?? []);
+      // Llamar directamente a Gamma API para obtener volume1wk, volume1mo completos
+      // Necesitamos estos campos para calcular spikes históricos reales
+      const pages = await Promise.all(
+        Array.from({ length: 8 }, (_, i) =>
+          fetch(
+            `https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100&offset=${i * 100}&order=volume_24hr&ascending=false`,
+            { headers: { Accept: "application/json" }, cache: "no-store" }
+          ).then(r => r.ok ? r.json() : []).catch(() => [])
+        )
+      );
+      const allMkts: any[] = pages.flat().map((m: any) => ({
+        ...m,
+        // Normalizar campos para compatibilidad
+        bestProb: (() => { try { const p = JSON.parse(m.outcomePrices ?? "[]").map(Number); return p.length ? Math.max(...p) : 0.5; } catch { return 0.5; } })(),
+        volume: parseFloat(m.volume ?? "0"),
+        volume24hr: parseFloat(m.volume24hr ?? "0"),
+        volume1wk: parseFloat(m.volume1wk ?? "0"),
+        volume1mo: parseFloat(m.volume1mo ?? "0"),
+        oneDayPriceChange: m.oneDayPriceChange ?? 0,
+        oneWeekPriceChange: m.oneWeekPriceChange ?? 0,
+        oneMonthPriceChange: m.oneMonthPriceChange ?? 0,
+        category: m.events?.[0]?.tags?.[0]?.label ?? "",
+        url: m.events?.[0]?.slug ? \`https://polymarket.com/event/\${m.events[0].slug}\` : \`https://polymarket.com/event/\${m.slug ?? ""}\`,
+        daysLeft: m.endDate ? (new Date(m.endDate).getTime() - Date.now()) / 86400000 : 999,
+        bestBid: m.bestBid ?? 0,
+        bestAsk: m.bestAsk ?? 0,
+        spread: m.spread ?? 0,
+      })).filter((m: any) => m.volume24hr > 5000);
 
       // Deduplicar
       const seen = new Set<string>();

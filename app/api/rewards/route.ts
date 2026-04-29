@@ -40,18 +40,28 @@ export async function GET(req: NextRequest) {
       const vol24       = Number(m.volume24hr ?? 0);
       const priceChange = Math.abs(Number(m.oneDayPriceChange ?? 0));
 
-      // FARMING SCORE (0-100)
-      // 1. Spread bajo (25pts) — más bajo = más fácil entrar/salir
-      const spreadScore = Math.round((1 - Math.min(1, spread / maxSpr)) * 25);
-      // 2. Baja competencia (25pts) — más share de la pool
-      const compScore   = Math.round((1 - competitive) * 25);
-      // 3. Rewards altas (20pts) — rewardsDailyRate real
-      const rewardScore = Math.min(20, Math.round((dailyRate / 1000) * 20));
-      // 4. Cierre lejano (20pts) — farmear tranquilo sin prisas
-      const timeScore   = daysLeft >= 30 ? 20 : daysLeft >= 7 ? 12 : daysLeft >= 1 ? 5 : 0;
-      // 5. Baja volatilidad (10pts) — precio estable
-      const volScore    = Math.round((1 - Math.min(1, priceChange / 0.2)) * 10);
-      const farmingScore = Math.round(spreadScore + compScore + rewardScore + timeScore + volScore);
+      // FARMING SCORE (0-100) — Rewards como factor dominante
+      // Mercados con < $10/día descartados directamente
+      if (dailyRate < 10) continue;
+
+      // 1. REWARDS (40pts) — escala logarítmica: $10=8 $100=20 $500=32 $2000+=40
+      const rewardScore = Math.min(40, Math.round(
+        (Math.log10(Math.max(10, dailyRate)) / Math.log10(2000)) * 40
+      ));
+
+      // 2. SPREAD BAJO (20pts) — spread actual bajo vs máximo permitido
+      const spreadScore = Math.round((1 - Math.min(1, spread / maxSpr)) * 20);
+
+      // 3. BAJA COMPETENCIA (20pts) — más share de la pool para ti
+      const compScore = Math.round((1 - competitive) * 20);
+
+      // 4. CIERRE LEJANO (15pts) — tiempo para farmear tranquilo
+      const timeScore = daysLeft >= 30 ? 15 : daysLeft >= 14 ? 10 : daysLeft >= 7 ? 5 : 2;
+
+      // 5. BAJA VOLATILIDAD (5pts) — precio estable = menos riesgo
+      const volScore = Math.round((1 - Math.min(1, priceChange / 0.2)) * 5);
+
+      const farmingScore = Math.round(rewardScore + spreadScore + compScore + timeScore + volScore);
 
       const eventSlug = m.events?.[0]?.slug ?? m.slug ?? "";
       const url = eventSlug
